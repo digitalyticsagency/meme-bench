@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meme Bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#000000;
+    --paper:#ffffff;
+    --wash:#ecebe6;
+    --rule:#d4d2cb;
+    --dim:#6d6b64;
+    --signal:#1f35ff;
+    --hot:#ff4d18;
+    --pad:22px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--wash);
+    color:var(--ink);
+    font-family:'Archivo',system-ui,sans-serif;
+    font-size:15px;
+    line-height:1.45;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--signal)}
+
+  header{
+    padding:var(--pad) var(--pad) 14px;
+    border-bottom:2px solid var(--ink);
+    background:var(--paper);
+  }
+  h1{
+    font-weight:800;
+    font-size:clamp(30px,5vw,44px);
+    letter-spacing:-0.03em;
+    margin:0;
+    line-height:1;
+  }
+  .tagline{margin:8px 0 0;max-width:56ch;color:var(--dim)}
+
+  .shell{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);
+    gap:2px;
+    background:var(--ink);
+    border-bottom:2px solid var(--ink);
+  }
+  @media (max-width:900px){ .shell{grid-template-columns:minmax(0,1fr)} }
+  .col{background:var(--paper);padding:var(--pad);min-width:0}
+
+  h2{
+    font-size:13px;
+    font-weight:600;
+    letter-spacing:0.01em;
+    margin:0 0 14px;
+    padding-bottom:8px;
+    border-bottom:1px solid var(--rule);
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:10px;
+  }
+  h2 span{color:var(--dim);font-weight:400}
+
+  label{display:block;font-size:13px;font-weight:500;margin:14px 0 5px}
+  input[type=text],input[type=password],textarea,select{
+    width:100%;
+    font:inherit;
+    font-size:14px;
+    padding:9px 11px;
+    border:1px solid var(--rule);
+    background:var(--paper);
+    color:var(--ink);
+    border-radius:2px;
+  }
+  textarea{resize:vertical;min-height:74px;line-height:1.4}
+  input:focus,textarea:focus,select:focus{outline:2px solid var(--signal);outline-offset:1px;border-color:var(--signal)}
+
+  button{
+    font:inherit;
+    font-weight:600;
+    font-size:14px;
+    padding:9px 15px;
+    border:1px solid var(--ink);
+    background:var(--ink);
+    color:var(--paper);
+    border-radius:2px;
+    cursor:pointer;
+  }
+  button:hover{background:var(--signal);border-color:var(--signal)}
+  button:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.ghost{background:transparent;color:var(--ink)}
+  button.ghost:hover{background:var(--ink);color:var(--paper)}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
+
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .chip{
+    font-size:12px;font-weight:500;padding:5px 9px;
+    border:1px solid var(--rule);background:var(--paper);
+    color:var(--ink);border-radius:99px;cursor:pointer;
+  }
+  .chip[aria-pressed=true]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+
+  .feed{list-style:none;margin:14px 0 0;padding:0;max-height:560px;overflow-y:auto}
+  .post{
+    display:grid;grid-template-columns:64px minmax(0,1fr);gap:12px;
+    padding:12px 0;border-top:1px solid var(--rule);
+  }
+  .post:first-child{border-top:0}
+  .thumb{
+    width:64px;height:64px;object-fit:cover;background:var(--wash);
+    border:1px solid var(--rule);border-radius:2px;
+  }
+  .post h3{font-size:14px;font-weight:600;margin:0 0 4px;line-height:1.3}
+  .post h3 a{color:var(--ink);text-decoration:none}
+  .post h3 a:hover{color:var(--signal)}
+  .meta{font-size:12px;color:var(--dim)}
+  .score{font-weight:800;color:var(--hot);font-variant-numeric:tabular-nums}
+  .post .row{margin-top:6px}
+  .post button{font-size:12px;padding:5px 9px}
+
+  .canvas-wrap{
+    margin-top:14px;border:1px solid var(--rule);background:var(--wash);
+    display:flex;justify-content:center;padding:12px;
+  }
+  canvas{max-width:100%;height:auto;background:#fff;box-shadow:0 1px 0 var(--rule)}
+
+  .note{font-size:12.5px;color:var(--dim);margin-top:8px}
+  .alert{
+    margin-top:12px;padding:10px 12px;font-size:13px;
+    border-left:3px solid var(--hot);background:#fff4f0;
+  }
+  .alert.ok{border-left-color:var(--signal);background:#f0f2ff}
+  .hidden{display:none}
+  details{margin-top:16px;border-top:1px solid var(--rule);padding-top:12px}
+  summary{cursor:pointer;font-size:13px;font-weight:600}
+
+  .topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+  .settings{
+    background:var(--paper);
+    border-bottom:2px solid var(--ink);
+    padding:var(--pad);
+  }
+  .settings h2{margin-top:0}
+  .settings .grid{
+    display:grid;
+    grid-template-columns:minmax(0,2fr) minmax(0,1fr);
+    gap:0 18px;
+  }
+  @media (max-width:700px){ .settings .grid{grid-template-columns:minmax(0,1fr)} }
+  .keyline{display:flex;gap:8px;align-items:center}
+  .keyline input{flex:1}
+  .check{display:flex;gap:8px;align-items:flex-start;margin-top:14px;font-size:13px}
+  .check input{margin-top:3px}
+  .linkish{
+    background:none;border:0;padding:0;color:var(--signal);
+    font-weight:600;font-size:inherit;text-decoration:underline;cursor:pointer;
+  }
+  .linkish:hover{background:none;color:var(--ink)}
+  .keystate{font-size:12.5px;font-weight:600;color:var(--dim)}
+  .keystate.set{color:var(--signal)}
+  footer{padding:16px var(--pad);font-size:12.5px;color:var(--dim);background:var(--paper)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="topbar">
+    <div>
+      <h1>Meme Bench</h1>
+      <p class="tagline">Watch what is actually working right now, then set your own caption over an image and export it at feed size.</p>
+    </div>
+    <button class="ghost" id="settingsToggle" aria-expanded="false" aria-controls="settings">Settings</button>
+  </div>
+</header>
+
+<section class="settings hidden" id="settings">
+  <h2>Settings <span id="keyState" class="keystate">No key added</span></h2>
+
+  <div class="grid">
+    <div>
+      <label for="apiKey">Gemini API key</label>
+      <div class="keyline">
+        <input type="password" id="apiKey" placeholder="AIza..." autocomplete="off" spellcheck="false">
+        <button class="ghost" type="button" id="revealKey">Show</button>
+      </div>
+      <p class="note">Get one free at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. The key goes straight from this page to Google and nowhere else.</p>
+
+      <div class="check">
+        <input type="checkbox" id="rememberKey">
+        <label for="rememberKey" style="margin:0;font-weight:400">Remember this key on this device so I don't retype it. Leave it off on a shared computer.</label>
+      </div>
+    </div>
+
+    <div>
+      <label for="model">Image model</label>
+      <select id="model">
+        <option value="gemini-2.5-flash-image" selected>Gemini 2.5 Flash Image</option>
+        <option value="gemini-3-pro-image-preview">Gemini 3 Pro Image (preview)</option>
+        <option value="imagen-4.0-generate-001">Imagen 4</option>
+      </select>
+      <p class="note">Flash Image is fastest and cheapest. Switch if your account has access to the others.</p>
+    </div>
+  </div>
+
+  <div class="row">
+    <button id="saveSettings">Save settings</button>
+    <button class="ghost" id="clearKey">Clear key</button>
+  </div>
+  <div id="settingsStatus" class="alert hidden"></div>
+</section>
+
+<div class="shell">
+
+  <!-- ============ LEFT: LIVE TRACKER ============ -->
+  <section class="col">
+    <h2>What is climbing <span id="feedStatus">idle</span></h2>
+
+    <p class="note">Pulls top posts from Reddit's public feed. Scores update every time you refresh.</p>
+
+    <div class="chips" id="subChips"></div>
+
+    <div class="row">
+      <select id="window" aria-label="Time window">
+        <option value="day">Past 24 hours</option>
+        <option value="week" selected>Past week</option>
+        <option value="month">Past month</option>
+      </select>
+      <button id="refresh">Refresh feed</button>
+    </div>
+
+    <div id="feedError" class="alert hidden"></div>
+    <ul class="feed" id="feed"></ul>
+  </section>
+
+  <!-- ============ RIGHT: STUDIO ============ -->
+  <section class="col">
+    <h2>Caption studio <span>1080 &times; 1350</span></h2>
+
+    <label for="caption">Caption</label>
+    <textarea id="caption" placeholder="Busy is not the same as productive">Just because you fit, doesn't mean you belong</textarea>
+
+    <div class="chips" id="presetCaptions"></div>
+
+    <div class="row">
+      <input type="file" id="upload" accept="image/*" aria-label="Upload image">
+      <button class="ghost" id="clearImg">Remove image</button>
+    </div>
+
+    <details id="genPanel">
+      <summary>Generate the image with Gemini</summary>
+      <p class="note">Uses the key and model from <button type="button" class="linkish" id="toSettings">Settings</button>.</p>
+
+      <label for="genPrompt">Image prompt</label>
+      <textarea id="genPrompt">Minimalist studio photograph, clean white seamless background, vertical composition. A single white phone charging cable plugged into a wall socket, the other end dangling loose with no phone attached. Soft even lighting, subtle shadow, product photography style. No text anywhere in the image.</textarea>
+
+      <div class="chips" id="presetPrompts"></div>
+
+      <div class="row">
+        <button id="generate">Generate image</button>
+      </div>
+      <div id="genStatus" class="alert hidden"></div>
+    </details>
+
+    <div class="canvas-wrap">
+      <canvas id="board" width="1080" height="1350"></canvas>
+    </div>
+
+    <div class="row">
+      <button id="download">Download PNG</button>
+    </div>
+  </section>
+</div>
+
+<footer>Captions render in Archivo 800 on white, matching the format that keeps resurfacing on TikTok and Instagram: one object, one line, no explanation.</footer>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ---------------- state ---------------- */
+  var SUBS = ['memes','wholesomememes','MemeEconomy','GetMotivated','coolguides','mildlyinteresting'];
+  var activeSubs = ['memes','GetMotivated'];
+  var currentImage = null;
+
+  var PRESET_CAPTIONS = [
+    "Busy is not the same as productive",
+    "You grow toward whatever light you are given",
+    "What you tolerate becomes part of you",
+    "Everything looks stable until the base moves",
+    "Effort and recognition are not the same jar"
+  ];
+
+  var PRESET_PROMPTS = {
+    "Charger": "Minimalist studio photograph, clean white seamless background, vertical composition. A single white phone charging cable plugged into a wall socket, the other end dangling loose with no phone attached. Soft even lighting, subtle shadow, product photography style. No text anywhere in the image.",
+    "Sunflowers": "Minimalist photograph in a dim room. Sunflowers in a plain vase, every flower head turned toward a cheap desk lamp instead of the window. Soft moody lighting, simple composition, vertical framing. No text anywhere in the image.",
+    "Tree and fence": "Minimalist photograph on a plain white background. A tree trunk that has grown around and swallowed a chain-link fence, the metal embedded in the bark. Clean isolated subject, soft studio lighting, high detail, vertical framing. No text anywhere in the image.",
+    "Jenga": "Minimalist studio photograph, clean white seamless background, vertical composition. A tall neat Jenga tower standing perfectly straight, but one block at the very bottom is pulled halfway out. Soft shadow, sharp focus. No text anywhere in the image.",
+    "Two jars": "Minimalist studio photograph on a clean white background, vertical composition. Two identical clear glass jars side by side. The left jar is filled to the brim with small stones, the right jar is nearly empty with only three stones. Soft even lighting. No text anywhere in the image."
+  };
+
+  var $ = function(id){ return document.getElementById(id); };
+
+  /* ---------------- chips ---------------- */
+  function buildSubChips(){
+    var box = $('subChips');
+    box.innerHTML = '';
+    SUBS.forEach(function(sub){
+      var b = document.createElement('button');
+      b.className = 'chip';
+      b.type = 'button';
+      b.textContent = 'r/' + sub;
+      b.setAttribute('aria-pressed', activeSubs.indexOf(sub) > -1 ? 'true' : 'false');
+      b.addEventListener('click', function(){
+        var i = activeSubs.indexOf(sub);
+        if (i > -1) { if (activeSubs.length > 1) activeSubs.splice(i,1); }
+        else { activeSubs.push(sub); }
+        b.setAttribute('aria-pressed', activeSubs.indexOf(sub) > -1 ? 'true' : 'false');
+        loadFeed();
+      });
+      box.appendChild(b);
+    });
+  }
+
+  function buildPresetChips(){
+    var cap = $('presetCaptions');
+    PRESET_CAPTIONS.forEach(function(text){
+      var b = document.createElement('button');
+      b.className = 'chip'; b.type = 'button';
+      b.textContent = text.length > 34 ? text.slice(0,32) + '...' : text;
+      b.title = text;
+      b.addEventListener('click', function(){ $('caption').value = text; draw(); });
+      cap.appendChild(b);
+    });
+
+    var pr = $('presetPrompts');
+    Object.keys(PRESET_PROMPTS).forEach(function(name){
+      var b = document.createElement('button');
+      b.className = 'chip'; b.type = 'button';
+      b.textContent = name;
+      b.addEventListener('click', function(){ $('genPrompt').value = PRESET_PROMPTS[name]; });
+      pr.appendChild(b);
+    });
+  }
+
+  /* ---------------- live feed ---------------- */
+  function showFeedError(msg){
+    var el = $('feedError');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+  }
+
+  function loadFeed(){
+    var win = $('window').value;
+    $('feedStatus').textContent = 'loading';
+    $('feedError').classList.add('hidden');
+
+    var jobs = activeSubs.map(function(sub){
+      var url = 'https://www.reddit.com/r/' + sub + '/top.json?t=' + win + '&limit=25';
+      return fetch(url, { headers: { 'Accept':'application/json' } })
+        .then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); })
+        .then(function(j){
+          return (j.data && j.data.children ? j.data.children : []).map(function(c){ return c.data; });
+        })
+        .catch(function(){ return []; });
+    });
+
+    Promise.all(jobs).then(function(sets){
+      var all = [];
+      sets.forEach(function(s){ all = all.concat(s); });
+
+      all = all.filter(function(p){
+        return p && !p.over_18 && !p.stickied && p.post_hint !== 'hosted:video';
+      });
+      all.sort(function(a,b){ return (b.score||0) - (a.score||0); });
+      all = all.slice(0, 30);
+
+      if (!all.length){
+        $('feedStatus').textContent = 'no results';
+        showFeedError('Nothing came back. Reddit sometimes blocks browser requests. Try refreshing, or switch the time window.');
+        renderFeed([]);
+        return;
+      }
+      $('feedStatus').textContent = all.length + ' posts';
+      renderFeed(all);
+    });
+  }
+
+  function pickThumb(p){
+    if (p.thumbnail && p.thumbnail.indexOf('http') === 0) return p.thumbnail;
+    if (p.preview && p.preview.images && p.preview.images[0]) {
+      return p.preview.images[0].source.url.replace(/&amp;/g,'&');
+    }
+    return '';
+  }
+
+  function renderFeed(posts){
+    var list = $('feed');
+    list.innerHTML = '';
+    posts.forEach(function(p){
+      var li = document.createElement('li');
+      li.className = 'post';
+
+      var img = document.createElement('img');
+      img.className = 'thumb';
+      img.alt = '';
+      img.loading = 'lazy';
+      img.src = pickThumb(p);
+
+      var body = document.createElement('div');
+
+      var h3 = document.createElement('h3');
+      var a = document.createElement('a');
+      a.href = 'https://www.reddit.com' + p.permalink;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = p.title;
+      h3.appendChild(a);
+
+      var meta = document.createElement('p');
+      meta.className = 'meta';
+      var score = document.createElement('span');
+      score.className = 'score';
+      score.textContent = (p.score||0).toLocaleString();
+      meta.appendChild(score);
+      meta.appendChild(document.createTextNode(' upvotes  r/' + p.subreddit + '  ' + (p.num_comments||0) + ' comments'));
+
+      var row = document.createElement('div');
+      row.className = 'row';
+      var use = document.createElement('button');
+      use.className = 'ghost';
+      use.type = 'button';
+      use.textContent = 'Use this title as caption';
+      use.addEventListener('click', function(){ $('caption').value = p.title; draw(); });
+      row.appendChild(use);
+
+      body.appendChild(h3);
+      body.appendChild(meta);
+      body.appendChild(row);
+      li.appendChild(img);
+      li.appendChild(body);
+      list.appendChild(li);
+    });
+  }
+
+  /* ---------------- gemini ---------------- */
+  function genStatus(msg, ok){
+    var el = $('genStatus');
+    el.textContent = msg;
+    el.className = 'alert' + (ok ? ' ok' : '');
+    el.classList.remove('hidden');
+  }
+
+  function generate(){
+    var key = $('apiKey').value.trim();
+    var model = $('model').value;
+    var prompt = $('genPrompt').value.trim();
+    if (!key) { genStatus('Add your Gemini API key in Settings first.'); openSettings(); return; }
+    if (!prompt) { genStatus('Write an image prompt first.'); return; }
+
+    $('generate').disabled = true;
+    genStatus('Generating. This usually takes 10 to 20 seconds.', true);
+
+    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(key);
+
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    })
+    .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, body: j }; }); })
+    .then(function(res){
+      if (!res.ok) {
+        var m = res.body && res.body.error ? res.body.error.message : 'Request failed.';
+        throw new Error(m);
+      }
+      var parts = res.body.candidates && res.body.candidates[0] &&
+                  res.body.candidates[0].content ? res.body.candidates[0].content.parts : [];
+      var data = null, mime = 'image/png';
+      for (var i = 0; i < parts.length; i++){
+        if (parts[i].inlineData) { data = parts[i].inlineData.data; mime = parts[i].inlineData.mimeType || mime; break; }
+      }
+      if (!data) throw new Error('No image came back. Try rewording the prompt.');
+      loadImage('data:' + mime + ';base64,' + data);
+      genStatus('Image ready.', true);
+    })
+    .catch(function(err){ genStatus(err.message); })
+    .then(function(){ $('generate').disabled = false; });
+  }
+
+  /* ---------------- canvas ---------------- */
+  function loadImage(src){
+    var img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = function(){ currentImage = img; draw(); };
+    img.onerror = function(){ genStatus('That image could not be loaded.'); };
+    img.src = src;
+  }
+
+  function wrap(ctx, text, maxWidth){
+    var words = text.split(/\s+/);
+    var lines = [], line = '';
+    for (var i = 0; i < words.length; i++){
+      var test = line ? line + ' ' + words[i] : words[i];
+      if (ctx.measureText(test).width > maxWidth && line){
+        lines.push(line); line = words[i];
+      } else { line = test; }
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+
+  function draw(){
+    var c = $('board'), ctx = c.getContext('2d');
+    var W = c.width, H = c.height, M = 64;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, W, H);
+
+    var text = $('caption').value.trim();
+    var size = 76;
+    var lines = [];
+
+    if (text){
+      for (;;){
+        ctx.font = '800 ' + size + 'px Archivo, sans-serif';
+        lines = wrap(ctx, text, W - M * 2);
+        if (lines.length <= 3 || size <= 44) break;
+        size -= 4;
+      }
+    }
+
+    var lineHeight = size * 1.12;
+    var textBlock = text ? (lines.length * lineHeight) + 30 : 0;
+    var top = M;
+
+    if (text){
+      ctx.fillStyle = '#000000';
+      ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
+      for (var i = 0; i < lines.length; i++){
+        ctx.fillText(lines[i], M, top + i * lineHeight);
+      }
+    }
+
+    if (currentImage){
+      var areaTop = top + textBlock + 20;
+      var areaH = H - areaTop - M;
+      var areaW = W - M * 2;
+      var scale = Math.min(areaW / currentImage.width, areaH / currentImage.height);
+      var w = currentImage.width * scale;
+      var h = currentImage.height * scale;
+      ctx.drawImage(currentImage, (W - w) / 2, areaTop + (areaH - h) / 2, w, h);
+    } else {
+      ctx.fillStyle = '#b9b7b0';
+      ctx.font = '500 30px Archivo, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Upload or generate an image', W / 2, H / 2);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  /* ---------------- settings ---------------- */
+  var STORE_KEY = 'memebench:settings';
+
+  function openSettings(){
+    $('settings').classList.remove('hidden');
+    $('settingsToggle').setAttribute('aria-expanded','true');
+    $('settings').scrollIntoView({ behavior:'smooth', block:'start' });
+  }
+
+  function settingsStatus(msg, ok){
+    var el = $('settingsStatus');
+    el.textContent = msg;
+    el.className = 'alert' + (ok ? ' ok' : '');
+    el.classList.remove('hidden');
+  }
+
+  function markKeyState(){
+    var el = $('keyState');
+    if ($('apiKey').value.trim()){
+      el.textContent = 'Key added';
+      el.classList.add('set');
+    } else {
+      el.textContent = 'No key added';
+      el.classList.remove('set');
+    }
+  }
+
+  function saveSettings(){
+    markKeyState();
+    var remember = $('rememberKey').checked;
+    var payload = {
+      model: $('model').value,
+      remember: remember,
+      key: remember ? $('apiKey').value.trim() : ''
+    };
+    try {
+      if (remember) {
+        localStorage.setItem(STORE_KEY, JSON.stringify(payload));
+      } else {
+        localStorage.removeItem(STORE_KEY);
+        sessionStorage.setItem(STORE_KEY, JSON.stringify(payload));
+      }
+      settingsStatus(remember
+        ? 'Saved. Your key will be here next time you open this.'
+        : 'Saved. The key stays in this tab only and clears when you close it.', true);
+    } catch (e) {
+      settingsStatus('Settings applied for this session, but saving them failed.', true);
+    }
+  }
+
+  function loadSettings(){
+    var raw = null;
+    try {
+      raw = localStorage.getItem(STORE_KEY) || sessionStorage.getItem(STORE_KEY);
+    } catch (e) { raw = null; }
+    if (!raw) { markKeyState(); return; }
+    try {
+      var s = JSON.parse(raw);
+      if (s.model) $('model').value = s.model;
+      $('rememberKey').checked = !!s.remember;
+      if (s.key) $('apiKey').value = s.key;
+    } catch (e) {}
+    markKeyState();
+  }
+
+  $('settingsToggle').addEventListener('click', function(){
+    var panel = $('settings');
+    var hidden = panel.classList.toggle('hidden');
+    this.setAttribute('aria-expanded', hidden ? 'false' : 'true');
+  });
+
+  $('toSettings').addEventListener('click', openSettings);
+  $('saveSettings').addEventListener('click', saveSettings);
+  $('apiKey').addEventListener('input', markKeyState);
+
+  $('revealKey').addEventListener('click', function(){
+    var f = $('apiKey');
+    var showing = f.type === 'text';
+    f.type = showing ? 'password' : 'text';
+    this.textContent = showing ? 'Show' : 'Hide';
+  });
+
+  $('clearKey').addEventListener('click', function(){
+    $('apiKey').value = '';
+    $('rememberKey').checked = false;
+    markKeyState();
+    try {
+      localStorage.removeItem(STORE_KEY);
+      sessionStorage.removeItem(STORE_KEY);
+    } catch (e) {}
+    settingsStatus('Key cleared.', true);
+  });
+
+  /* ---------------- wiring ---------------- */
+  $('refresh').addEventListener('click', loadFeed);
+  $('window').addEventListener('change', loadFeed);
+  $('caption').addEventListener('input', draw);
+  $('generate').addEventListener('click', generate);
+
+  $('upload').addEventListener('change', function(e){
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function(){ loadImage(reader.result); };
+    reader.readAsDataURL(f);
+  });
+
+  $('clearImg').addEventListener('click', function(){
+    currentImage = null;
+    $('upload').value = '';
+    draw();
+  });
+
+  $('download').addEventListener('click', function(){
+    var a = document.createElement('a');
+    a.download = 'meme-' + Date.now() + '.png';
+    a.href = $('board').toDataURL('image/png');
+    a.click();
+  });
+
+  buildSubChips();
+  buildPresetChips();
+  loadSettings();
+
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(draw);
+  } else {
+    draw();
+  }
+  loadFeed();
+})();
+</script>
+</body>
+</html>
