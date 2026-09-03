@@ -132,6 +132,16 @@
   }
   canvas{max-width:100%;height:auto;background:#fff;box-shadow:0 1px 0 var(--rule)}
 
+  .ideas{list-style:none;margin:12px 0 0;padding:0}
+  .ideas li{
+    padding:10px 0;border-top:1px solid var(--rule);
+    display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;
+  }
+  .ideas li:first-child{border-top:0}
+  .ideas p{margin:0;font-size:14px;font-weight:600;line-height:1.3}
+  .ideas .shot{display:block;margin-top:3px;font-size:12.5px;font-weight:400;color:var(--dim)}
+  .ideas button{font-size:12px;padding:5px 9px;white-space:nowrap}
+
   .note{font-size:12.5px;color:var(--dim);margin-top:8px}
   .alert{
     margin-top:12px;padding:10px 12px;font-size:13px;
@@ -151,10 +161,10 @@
   .settings h2{margin-top:0}
   .settings .grid{
     display:grid;
-    grid-template-columns:minmax(0,2fr) minmax(0,1fr);
+    grid-template-columns:repeat(3,minmax(0,1fr));
     gap:0 18px;
   }
-  @media (max-width:700px){ .settings .grid{grid-template-columns:minmax(0,1fr)} }
+  @media (max-width:900px){ .settings .grid{grid-template-columns:minmax(0,1fr)} }
   .keyline{display:flex;gap:8px;align-items:center}
   .keyline input{flex:1}
   .check{display:flex;gap:8px;align-items:flex-start;margin-top:14px;font-size:13px}
@@ -200,6 +210,15 @@
     </div>
 
     <div>
+      <label for="claudeKey">Claude API key</label>
+      <div class="keyline">
+        <input type="password" id="claudeKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+        <button class="ghost" type="button" id="revealClaude">Show</button>
+      </div>
+      <p class="note">Writes the captions. Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>. Sent from this page straight to Anthropic.</p>
+    </div>
+
+    <div>
       <label for="model">Image model</label>
       <select id="model">
         <option value="gemini-2.5-flash-image" selected>Gemini 2.5 Flash Image</option>
@@ -212,7 +231,7 @@
 
   <div class="row">
     <button id="saveSettings">Save settings</button>
-    <button class="ghost" id="clearKey">Clear key</button>
+    <button class="ghost" id="clearKey">Clear keys</button>
   </div>
   <div id="settingsStatus" class="alert hidden"></div>
 </section>
@@ -248,6 +267,15 @@
     <textarea id="caption" placeholder="Busy is not the same as productive">Just because you fit, doesn't mean you belong</textarea>
 
     <div class="chips" id="presetCaptions"></div>
+
+    <label for="brief">Caption ideas from Claude</label>
+    <textarea id="brief" placeholder="What should the captions be about?">Working hard on things that do not compound</textarea>
+    <div class="row">
+      <button id="writeCaptions">Write 6 captions</button>
+      <button class="ghost" id="moreCaptions">6 more</button>
+    </div>
+    <div id="captionStatus" class="alert hidden"></div>
+    <ul class="ideas" id="ideas"></ul>
 
     <div class="row">
       <input type="file" id="upload" accept="image/*" aria-label="Upload image">
@@ -450,6 +478,126 @@
     });
   }
 
+  /* ---------------- claude captions ---------------- */
+  var CAPTION_MODEL = 'claude-opus-5';
+  var seen = [];
+
+  function captionStatus(msg, ok){
+    var el = $('captionStatus');
+    el.textContent = msg;
+    el.className = 'alert' + (ok ? ' ok' : '');
+    el.classList.remove('hidden');
+  }
+
+  function captionPrompt(brief, avoid){
+    var lines = [
+      'You write single-line captions for image posts. The format is one plain object photographed on white, with one line of type above it. The line names a pattern in how people live; the object is the metaphor. No jokes, no explanation, no hashtags, no emoji, no quotation marks.',
+      '',
+      'Brief: ' + brief,
+      '',
+      'Write 6. Each caption is at most 9 words. For each, name the single object that would sit under it, in a short phrase.',
+      '',
+      'Reply with only a JSON array of {"caption": string, "object": string} objects and nothing else.'
+    ];
+    if (avoid.length){
+      lines.splice(4, 0, 'Do not repeat or rephrase any of these: ' + avoid.join(' | '), '');
+    }
+    return lines.join('\n');
+  }
+
+  function parseCaptions(text){
+    var start = text.indexOf('[');
+    var end = text.lastIndexOf(']');
+    if (start === -1 || end === -1) throw new Error('Claude did not return a caption list. Try again.');
+    var rows = JSON.parse(text.slice(start, end + 1));
+    return rows.filter(function(r){ return r && typeof r.caption === 'string'; });
+  }
+
+  function writeCaptions(append){
+    var key = $('claudeKey').value.trim();
+    var brief = $('brief').value.trim();
+    if (!key) { captionStatus('Add your Claude API key in Settings first.'); openSettings(); return; }
+    if (!brief) { captionStatus('Say what the captions should be about first.'); return; }
+
+    $('writeCaptions').disabled = true;
+    $('moreCaptions').disabled = true;
+    captionStatus('Writing. This takes a few seconds.', true);
+
+    fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: CAPTION_MODEL,
+        max_tokens: 4000,
+        output_config: { effort: 'medium' },
+        messages: [{ role: 'user', content: captionPrompt(brief, append ? seen : []) }]
+      })
+    })
+    .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, body: j }; }); })
+    .then(function(res){
+      if (!res.ok) {
+        throw new Error(res.body && res.body.error ? res.body.error.message : 'Request failed.');
+      }
+      if (res.body.stop_reason === 'refusal') {
+        throw new Error('Claude declined this brief. Try wording it differently.');
+      }
+      var text = (res.body.content || []).filter(function(b){ return b.type === 'text'; })
+                                         .map(function(b){ return b.text; }).join('');
+      var rows = parseCaptions(text);
+      if (!rows.length) throw new Error('No captions came back. Try a more concrete brief.');
+      rows.forEach(function(r){ seen.push(r.caption); });
+      renderIdeas(rows, append);
+      captionStatus(rows.length + ' captions ready. Click one to put it on the canvas.', true);
+    })
+    .catch(function(err){ captionStatus(err.message); })
+    .then(function(){
+      $('writeCaptions').disabled = false;
+      $('moreCaptions').disabled = false;
+    });
+  }
+
+  function renderIdeas(rows, append){
+    var list = $('ideas');
+    if (!append) list.innerHTML = '';
+    rows.forEach(function(r){
+      var li = document.createElement('li');
+
+      var p = document.createElement('p');
+      p.textContent = r.caption;
+      if (r.object){
+        var shot = document.createElement('span');
+        shot.className = 'shot';
+        shot.textContent = 'Shoot: ' + r.object;
+        p.appendChild(shot);
+      }
+
+      var use = document.createElement('button');
+      use.className = 'ghost';
+      use.type = 'button';
+      use.textContent = 'Use';
+      use.addEventListener('click', function(){
+        $('caption').value = r.caption;
+        if (r.object) $('genPrompt').value = imagePrompt(r.object);
+        draw();
+      });
+
+      li.appendChild(p);
+      li.appendChild(use);
+      list.appendChild(li);
+    });
+  }
+
+  function imagePrompt(object){
+    return 'Minimalist studio photograph, clean white seamless background, vertical composition. ' +
+           object.charAt(0).toUpperCase() + object.slice(1) +
+           '. Soft even lighting, subtle shadow, sharp focus, product photography style. No text anywhere in the image.';
+  }
+
   /* ---------------- gemini ---------------- */
   function genStatus(msg, ok){
     var el = $('genStatus');
@@ -585,11 +733,12 @@
 
   function markKeyState(){
     var el = $('keyState');
-    if ($('apiKey').value.trim()){
-      el.textContent = 'Key added';
+    var n = ($('apiKey').value.trim() ? 1 : 0) + ($('claudeKey').value.trim() ? 1 : 0);
+    if (n){
+      el.textContent = n === 2 ? 'Both keys added' : '1 of 2 keys added';
       el.classList.add('set');
     } else {
-      el.textContent = 'No key added';
+      el.textContent = 'No keys added';
       el.classList.remove('set');
     }
   }
@@ -600,7 +749,8 @@
     var payload = {
       model: $('model').value,
       remember: remember,
-      key: remember ? $('apiKey').value.trim() : ''
+      key: remember ? $('apiKey').value.trim() : '',
+      claudeKey: remember ? $('claudeKey').value.trim() : ''
     };
     try {
       if (remember) {
@@ -628,6 +778,7 @@
       if (s.model) $('model').value = s.model;
       $('rememberKey').checked = !!s.remember;
       if (s.key) $('apiKey').value = s.key;
+      if (s.claudeKey) $('claudeKey').value = s.claudeKey;
     } catch (e) {}
     markKeyState();
   }
@@ -641,6 +792,7 @@
   $('toSettings').addEventListener('click', openSettings);
   $('saveSettings').addEventListener('click', saveSettings);
   $('apiKey').addEventListener('input', markKeyState);
+  $('claudeKey').addEventListener('input', markKeyState);
 
   $('revealKey').addEventListener('click', function(){
     var f = $('apiKey');
@@ -649,15 +801,23 @@
     this.textContent = showing ? 'Show' : 'Hide';
   });
 
+  $('revealClaude').addEventListener('click', function(){
+    var f = $('claudeKey');
+    var showing = f.type === 'text';
+    f.type = showing ? 'password' : 'text';
+    this.textContent = showing ? 'Show' : 'Hide';
+  });
+
   $('clearKey').addEventListener('click', function(){
     $('apiKey').value = '';
+    $('claudeKey').value = '';
     $('rememberKey').checked = false;
     markKeyState();
     try {
       localStorage.removeItem(STORE_KEY);
       sessionStorage.removeItem(STORE_KEY);
     } catch (e) {}
-    settingsStatus('Key cleared.', true);
+    settingsStatus('Both keys cleared.', true);
   });
 
   /* ---------------- wiring ---------------- */
@@ -665,6 +825,8 @@
   $('window').addEventListener('change', loadFeed);
   $('caption').addEventListener('input', draw);
   $('generate').addEventListener('click', generate);
+  $('writeCaptions').addEventListener('click', function(){ writeCaptions(false); });
+  $('moreCaptions').addEventListener('click', function(){ writeCaptions(true); });
 
   $('upload').addEventListener('change', function(e){
     var f = e.target.files && e.target.files[0];
