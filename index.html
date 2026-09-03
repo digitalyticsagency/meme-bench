@@ -149,6 +149,7 @@
   }
   .alert.ok{border-left-color:var(--signal);background:#f0f2ff}
   .hidden{display:none}
+  [hidden]{display:none !important}
   details{margin-top:16px;border-top:1px solid var(--rule);padding-top:12px}
   summary{cursor:pointer;font-size:13px;font-weight:600}
 
@@ -210,6 +211,14 @@
     </div>
 
     <div>
+      <label for="redditId">Reddit app client ID</label>
+      <div class="keyline">
+        <input type="text" id="redditId" placeholder="Ab3dEf..." autocomplete="off" spellcheck="false">
+      </div>
+      <p class="note">Only needed for the Reddit source. Create a free <strong>installed app</strong> at <a href="https://www.reddit.com/prefs/apps" target="_blank" rel="noopener">reddit.com/prefs/apps</a> and copy the ID under its name. There is no secret to paste — installed apps do not have one.</p>
+    </div>
+
+    <div>
       <label for="claudeKey">Claude API key</label>
       <div class="keyline">
         <input type="password" id="claudeKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
@@ -242,18 +251,22 @@
   <section class="col">
     <h2>What is climbing <span id="feedStatus">idle</span></h2>
 
-    <p class="note">Pulls top posts from Reddit's public feed. Scores update every time you refresh.</p>
-
-    <div class="chips" id="subChips"></div>
+    <p class="note" id="feedNote">The templates people are actually building on right now, ranked by how many captions were made this week.</p>
 
     <div class="row">
-      <select id="window" aria-label="Time window">
+      <select id="source" aria-label="Source">
+        <option value="imgflip" selected>Imgflip templates</option>
+        <option value="reddit">Reddit</option>
+      </select>
+      <select id="window" aria-label="Time window" hidden>
         <option value="day">Past 24 hours</option>
         <option value="week" selected>Past week</option>
         <option value="month">Past month</option>
       </select>
       <button id="refresh">Refresh feed</button>
     </div>
+
+    <div class="chips" id="subChips" hidden></div>
 
     <div id="feedError" class="alert hidden"></div>
     <ul class="feed" id="feed"></ul>
@@ -385,54 +398,161 @@
     el.classList.remove('hidden');
   }
 
+  function feedStatus(text){ $('feedStatus').textContent = text; }
+
+  function syncSourceControls(){
+    var reddit = $('source').value === 'reddit';
+    $('subChips').hidden = !reddit;
+    $('window').hidden = !reddit;
+    $('feedNote').textContent = reddit
+      ? 'Top posts from the subreddits you pick, through Reddit\'s OAuth API.'
+      : 'The templates people are actually building on right now, ranked by how many captions were made this week.';
+  }
+
   function loadFeed(){
-    var win = $('window').value;
-    $('feedStatus').textContent = 'loading';
     $('feedError').classList.add('hidden');
+    $('feed').innerHTML = '';
+    feedStatus('loading');
+    if ($('source').value === 'reddit') loadReddit();
+    else loadImgflip();
+  }
 
-    var jobs = activeSubs.map(function(sub){
-      var url = 'https://www.reddit.com/r/' + sub + '/top.json?t=' + win + '&limit=25';
-      return fetch(url, { headers: { 'Accept':'application/json' } })
-        .then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); })
-        .then(function(j){
-          return (j.data && j.data.children ? j.data.children : []).map(function(c){ return c.data; });
-        })
-        .catch(function(){ return []; });
-    });
-
-    Promise.all(jobs).then(function(sets){
-      var all = [];
-      sets.forEach(function(s){ all = all.concat(s); });
-
-      all = all.filter(function(p){
-        return p && !p.over_18 && !p.stickied && p.post_hint !== 'hosted:video';
+  /* ---- imgflip: no key, no setup ---- */
+  function loadImgflip(){
+    fetch('https://api.imgflip.com/get_memes')
+      .then(function(r){ if (!r.ok) throw new Error('Imgflip returned ' + r.status); return r.json(); })
+      .then(function(j){
+        if (!j.success || !j.data || !j.data.memes) throw new Error(j.error_message || 'Imgflip sent no templates.');
+        var rows = j.data.memes.slice(0, 30).map(function(m){
+          return {
+            title: m.name,
+            score: m.captions || 0,
+            unit: 'captions made',
+            meta: m.width + ' × ' + m.height,
+            link: 'https://imgflip.com/memetemplate/' + m.id,
+            thumb: m.url,
+            image: m.url
+          };
+        });
+        feedStatus(rows.length + ' templates');
+        renderFeed(rows);
+      })
+      .catch(function(err){
+        feedStatus('failed');
+        showFeedError(err.message + ' Try refreshing.');
       });
-      all.sort(function(a,b){ return (b.score||0) - (a.score||0); });
-      all = all.slice(0, 30);
+  }
 
-      if (!all.length){
-        $('feedStatus').textContent = 'no results';
-        showFeedError('Nothing came back. Reddit sometimes blocks browser requests. Try refreshing, or switch the time window.');
-        renderFeed([]);
-        return;
+  /* ---- reddit: application-only OAuth ---- */
+  var redditToken = null;
+
+  function deviceId(){
+    var id = null;
+    try { id = localStorage.getItem('memebench:device'); } catch (e) {}
+    if (!id){
+      id = 'dev';
+      for (var i = 0; i < 21; i++) id += 'abcdefghijklmnopqrstuvwxyz0123456789'.charAt(Math.floor(Math.random() * 36));
+      try { localStorage.setItem('memebench:device', id); } catch (e) {}
+    }
+    return id;
+  }
+
+  function redditAuth(){
+    if (redditToken && redditToken.expires > Date.now() + 60000){
+      return Promise.resolve(redditToken.value);
+    }
+    var id = $('redditId').value.trim();
+    if (!id) return Promise.reject(new Error('Add your Reddit app client ID in Settings to use this source. Reddit stopped serving its public JSON feed to browsers.'));
+
+    var body = 'grant_type=' + encodeURIComponent('https://oauth.reddit.com/grants/installed_client') +
+               '&device_id=' + encodeURIComponent(deviceId());
+
+    return fetch('https://www.reddit.com/api/v1/access_token', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + btoa(id + ':'),
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: body
+    })
+    .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, body: j }; }); })
+    .then(function(res){
+      if (!res.ok || !res.body.access_token){
+        throw new Error(res.body && res.body.error === 401
+          ? 'Reddit rejected that client ID. Check it is an installed app and the ID is copied from under the app name.'
+          : 'Reddit would not issue a token.');
       }
-      $('feedStatus').textContent = all.length + ' posts';
-      renderFeed(all);
+      redditToken = {
+        value: res.body.access_token,
+        expires: Date.now() + (res.body.expires_in || 3600) * 1000
+      };
+      return redditToken.value;
+    });
+  }
+
+  function loadReddit(){
+    var win = $('window').value;
+
+    redditAuth().then(function(token){
+      var jobs = activeSubs.map(function(sub){
+        var url = 'https://oauth.reddit.com/r/' + sub + '/top?t=' + win + '&limit=25&raw_json=1';
+        return fetch(url, { headers: { 'Authorization': 'bearer ' + token } })
+          .then(function(r){ if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(function(j){
+            return (j.data && j.data.children ? j.data.children : []).map(function(c){ return c.data; });
+          })
+          .catch(function(){ return []; });
+      });
+
+      return Promise.all(jobs).then(function(sets){
+        var all = [];
+        sets.forEach(function(set){ all = all.concat(set); });
+
+        all = all.filter(function(p){
+          return p && !p.over_18 && !p.stickied && p.post_hint !== 'hosted:video';
+        });
+        all.sort(function(a,b){ return (b.score||0) - (a.score||0); });
+
+        var rows = all.slice(0, 30).map(function(p){
+          return {
+            title: p.title,
+            score: p.score || 0,
+            unit: 'upvotes',
+            meta: 'r/' + p.subreddit + '  ' + (p.num_comments||0) + ' comments',
+            link: 'https://www.reddit.com' + p.permalink,
+            thumb: pickThumb(p),
+            image: null
+          };
+        });
+
+        if (!rows.length){
+          feedStatus('no results');
+          showFeedError('Nothing came back from those subreddits. Try another time window.');
+          return;
+        }
+        feedStatus(rows.length + ' posts');
+        renderFeed(rows);
+      });
+    })
+    .catch(function(err){
+      feedStatus('needs setup');
+      showFeedError(err.message);
     });
   }
 
   function pickThumb(p){
     if (p.thumbnail && p.thumbnail.indexOf('http') === 0) return p.thumbnail;
     if (p.preview && p.preview.images && p.preview.images[0]) {
-      return p.preview.images[0].source.url.replace(/&amp;/g,'&');
+      return p.preview.images[0].source.url;
     }
     return '';
   }
 
-  function renderFeed(posts){
+  /* ---- shared rendering ---- */
+  function renderFeed(rows){
     var list = $('feed');
     list.innerHTML = '';
-    posts.forEach(function(p){
+    rows.forEach(function(row){
       var li = document.createElement('li');
       li.className = 'post';
 
@@ -440,38 +560,47 @@
       img.className = 'thumb';
       img.alt = '';
       img.loading = 'lazy';
-      img.src = pickThumb(p);
+      if (row.thumb) img.src = row.thumb;
 
       var body = document.createElement('div');
 
       var h3 = document.createElement('h3');
       var a = document.createElement('a');
-      a.href = 'https://www.reddit.com' + p.permalink;
+      a.href = row.link;
       a.target = '_blank';
       a.rel = 'noopener';
-      a.textContent = p.title;
+      a.textContent = row.title;
       h3.appendChild(a);
 
       var meta = document.createElement('p');
       meta.className = 'meta';
       var score = document.createElement('span');
       score.className = 'score';
-      score.textContent = (p.score||0).toLocaleString();
+      score.textContent = row.score.toLocaleString();
       meta.appendChild(score);
-      meta.appendChild(document.createTextNode(' upvotes  r/' + p.subreddit + '  ' + (p.num_comments||0) + ' comments'));
+      meta.appendChild(document.createTextNode(' ' + row.unit + '  ' + row.meta));
 
-      var row = document.createElement('div');
-      row.className = 'row';
-      var use = document.createElement('button');
-      use.className = 'ghost';
-      use.type = 'button';
-      use.textContent = 'Use this title as caption';
-      use.addEventListener('click', function(){ $('caption').value = p.title; draw(); });
-      row.appendChild(use);
+      var controls = document.createElement('div');
+      controls.className = 'row';
+
+      if (row.image){
+        var useImg = document.createElement('button');
+        useImg.type = 'button';
+        useImg.textContent = 'Put this on the canvas';
+        useImg.addEventListener('click', function(){ loadImage(row.image); });
+        controls.appendChild(useImg);
+      }
+
+      var useText = document.createElement('button');
+      useText.className = 'ghost';
+      useText.type = 'button';
+      useText.textContent = 'Use the title as caption';
+      useText.addEventListener('click', function(){ $('caption').value = row.title; draw(); });
+      controls.appendChild(useText);
 
       body.appendChild(h3);
       body.appendChild(meta);
-      body.appendChild(row);
+      body.appendChild(controls);
       li.appendChild(img);
       li.appendChild(body);
       list.appendChild(li);
@@ -750,7 +879,8 @@
       model: $('model').value,
       remember: remember,
       key: remember ? $('apiKey').value.trim() : '',
-      claudeKey: remember ? $('claudeKey').value.trim() : ''
+      claudeKey: remember ? $('claudeKey').value.trim() : '',
+      redditId: $('redditId').value.trim()
     };
     try {
       if (remember) {
@@ -779,6 +909,7 @@
       $('rememberKey').checked = !!s.remember;
       if (s.key) $('apiKey').value = s.key;
       if (s.claudeKey) $('claudeKey').value = s.claudeKey;
+      if (s.redditId) $('redditId').value = s.redditId;
     } catch (e) {}
     markKeyState();
   }
@@ -823,6 +954,7 @@
   /* ---------------- wiring ---------------- */
   $('refresh').addEventListener('click', loadFeed);
   $('window').addEventListener('change', loadFeed);
+  $('source').addEventListener('change', function(){ syncSourceControls(); loadFeed(); });
   $('caption').addEventListener('input', draw);
   $('generate').addEventListener('click', generate);
   $('writeCaptions').addEventListener('click', function(){ writeCaptions(false); });
@@ -850,6 +982,7 @@
   });
 
   buildSubChips();
+  syncSourceControls();
   buildPresetChips();
   loadSettings();
 
