@@ -567,7 +567,9 @@
       '',
       '3. ANALYSE WHAT YOU READ. Across the real captions you collected: what is each text box doing, what is the shape of the joke, where does the turn come, how long are the lines, what register do people write in. Say which are the strong ones and what the weak ones have in common. Do this on the examples in front of you, not on a general idea of the format — this step is what decides whether your captions are any good.',
       '',
-      '4. WRITE. Six new captions that run the same mechanism on a fresh subject. Do not reuse a subject you read, and do not write a variation of one you read.',
+      '4. WRITE. Six new captions that run the same mechanism on a fresh subject.',
+      '',
+      'The six are yours, not theirs. None of them may be a caption you read, a reworded version of one, or the same joke about the same subject. If a line you draft resembles one you collected, throw it out and write another. The captions you read belong in "studied" and nowhere else — putting one in "lines" is the one way to get this wrong.',
       '',
       brief ? 'Aim them here if it fits the format: ' + brief : 'Pick the subject yourself. Something specific and current, not a general observation.',
       '',
@@ -899,8 +901,8 @@
 
     callClaude(payload, function(stage){ setState(research ? 'Researching: ' + stage : 'Writing'); })
     .then(function(text){
-      var rows = parseCaptions(text);
-      if (!rows.length) throw new Error('No captions came back. Try a more concrete brief.');
+      var rows = dropCopies(parseCaptions(text));
+      if (!rows.length) throw new Error('Everything it wrote was a copy of something it read. Try again.');
       rows.forEach(function(r){ seen.push(r.lines.join(' / ')); });
       renderIdeas(rows, append);
       stopTicker();
@@ -918,6 +920,32 @@
       stopTicker();
       buttons.forEach(function(b){ b.disabled = false; });
       syncImageButton();
+    });
+  }
+
+  /* A caption it collected is research, not output. Anything that comes back
+     matching one goes in the bin. */
+  function flatten(t){
+    return String(t).toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function dropCopies(rows){
+    var read = {};
+    rows.forEach(function(r){
+      (r.studied || []).forEach(function(q){
+        read[flatten(q)] = true;
+      });
+    });
+
+    return rows.filter(function(r){
+      var joined = flatten(r.lines.join(' '));
+      if (!joined) return false;
+      if (read[joined]) return false;
+      for (var key in read){
+        if (!read.hasOwnProperty(key) || key.length < 20) continue;
+        if (key.indexOf(joined) > -1 || joined.indexOf(key) > -1) return false;
+      }
+      return true;
     });
   }
 
@@ -940,7 +968,7 @@
       var sub = document.createElement('div');
       sub.style.marginTop = '6px';
       sub.style.color = 'var(--dim)';
-      sub.textContent = 'Real ones it read: ' + first.studied.slice(0, 3).map(function(t){
+      sub.textContent = 'Existing ones it studied, for reference only: ' + first.studied.slice(0, 3).map(function(t){
         return '\u201c' + t + '\u201d';
       }).join('  ·  ');
       el.appendChild(sub);
