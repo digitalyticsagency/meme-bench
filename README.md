@@ -2,9 +2,10 @@
 
 A single-file web app for making feed-sized caption images. It has two halves:
 
-- **What is climbing** — the top 100 Imgflip templates, ranked by how many
-  captions people made on each this week. Any of them drops straight onto the
-  canvas as the image, and the title can be pushed into the caption field.
+- **What is climbing** — two sources. **Imgflip templates** ranks the top 100
+  meme templates by how many captions people made on each this week; any of them
+  drops onto the canvas, carrying its name and text-box count with it.
+  **Imgur** shows the most viral posts of the moment, for ideas.
 - **Caption studio** — writes captions with Claude, renders the one you pick in
   Archivo 800 over an uploaded or generated image on a 1080 × 1350 canvas, and
   exports it as a PNG.
@@ -16,11 +17,28 @@ Captions come from the Claude API (`claude-opus-5`) two ways:
   already wrote, so the list keeps going without repeating. Picking a caption
   loads a matching image prompt.
 - **From the image** — with a picture on the canvas, **Read the image** sends it
-  to Claude, which works out what is actually in the frame and writes six
-  captions against that specific detail rather than a generic version of the
-  object. Sharpest first. The image is downsized to 1024px and sent as JPEG.
+  to Claude along with the web search tool. Claude identifies the template,
+  searches for how it is actually used and what the joke structure carries,
+  works out the mechanism, then writes six new captions using it. Funniest
+  first, one line per text box. The image is downsized to 1024px and sent as
+  JPEG; the round trip takes around half a minute because of the searching.
+
+The prompt is explicit about what kills a caption — proverb voice, explaining
+the joke, being about people in general — because without that, models default
+to writing fridge magnets.
 
 Images can be uploaded from disk or generated with the Gemini API.
+
+## Layout
+
+The caption box takes one line per text box. **Layout** picks how they land:
+
+- **Match the template** (default) — text over the image when there is more than
+  one line, caption above the image when there is one.
+- **Caption above the image** — the plain-object format: Archivo 800 on white,
+  picture underneath.
+- **Text over the image** — the classic format: white with a heavy black outline,
+  first line at the top, last at the bottom, any others spread between.
 
 ## Running it
 
@@ -44,6 +62,10 @@ neither — Imgflip's endpoint is open.
 
 - **Claude** — writes the captions. Get one at
   [console.anthropic.com](https://console.anthropic.com/settings/keys).
+- **Imgur client ID** — only for the Imgur source. Register at
+  [api.imgur.com](https://api.imgur.com/oauth2/addclient), choose *anonymous
+  usage without user authorization*, copy the Client ID. Issued immediately, not
+  a secret.
 - **Gemini** — generates the images. Get one at
   [aistudio.google.com/apikey](https://aistudio.google.com/apikey). Pick a model:
   Gemini 2.5 Flash Image (default), Gemini 3 Pro Image (preview), or Imagen 4.
