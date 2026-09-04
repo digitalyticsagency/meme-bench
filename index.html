@@ -408,7 +408,7 @@
       })
       .catch(function(err){
         feedStatus('failed');
-        showFeedError(err.message + ' Try refreshing.');
+        showFeedError(err instanceof TypeError ? networkHint() : err.message + ' Try refreshing.');
       });
   }
 
@@ -627,6 +627,11 @@
       },
       body: JSON.stringify(payload)
     })
+    .catch(function(){
+      /* fetch rejects before any response: the request never left the browser
+         or never came back. Nothing about the key or the prompt is at fault. */
+      throw new Error(networkHint());
+    })
     .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, body: j }; }); })
     .then(function(res){
       if (!res.ok) throw new Error(res.body && res.body.error ? res.body.error.message : 'Request failed.');
@@ -634,6 +639,16 @@
       return (res.body.content || []).filter(function(b){ return b.type === 'text'; })
                                      .map(function(b){ return b.text; }).join('\n');
     });
+  }
+
+  function networkHint(){
+    if (location.protocol === 'file:'){
+      return 'The request never left the browser. This page is open straight from disk, and some browsers block calls to other sites from a file:// page. Serve the folder instead — python3 -m http.server 8000 — and open http://localhost:8000.';
+    }
+    if (!navigator.onLine){
+      return 'The request never left the browser: this device is offline.';
+    }
+    return 'Could not reach api.anthropic.com. The request never left the browser, so this is not the key or the prompt. Usually an ad blocker or privacy extension blocking the call, a VPN or work network blocking the host, or the browser being offline. Try a private window with extensions off.';
   }
 
   var SEARCH_TOOL = { type: 'web_search_20260209', name: 'web_search', max_uses: 8 };
@@ -875,6 +890,7 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
     })
+    .catch(function(){ throw new Error(networkHint()); })
     .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, body: j }; }); })
     .then(function(res){
       if (!res.ok) {
