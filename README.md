@@ -19,13 +19,25 @@ Captions come from the Claude API (`claude-opus-5`) two ways:
   already wrote, so the list keeps going without repeating. Picking a caption
   loads a matching image prompt.
 - **From the image** — with a picture on the canvas, **Read the image** sends it
-  to Claude with the web search tool and a four-step instruction: identify the
-  template by searching for it, find real captioned examples in the wild, name
-  the mechanism that makes good ones land, then write six new captions running
-  that mechanism on a fresh subject. It reports back what it identified the
-  image as, so you can see the research happened. Funniest first, one line per
+  to Claude with the web search and web fetch tools and a four-step instruction:
+  identify the image, go and read the wording of at least eight real instances
+  of it, analyse what those captions have in common, then write six new ones
+  running the same mechanism on a fresh subject. When the picture came from the
+  feed, the template's Imgflip page is handed over by URL — web fetch will only
+  open a link already in the conversation — which also yields the other names
+  people call that format by, for the next round of searching.
+
+  It reports what it identified the image as and quotes three of the real
+  captions it read, so you can see whether the research actually happened. If it
+  found none, it says so rather than pretending. Funniest first, one line per
   text box. The image is downsized to 1024px and sent as JPEG; the round trip
-  takes around half a minute because of the searching.
+  takes around half a minute.
+
+  One limit worth knowing: meme captions live inside the pixels, and the fetch
+  tool returns page text, so nothing here does OCR on found images. What it can
+  read is wording written out as text — Know Your Meme quoting notable examples,
+  round-ups quoting good ones, forum and social posts with the caption in the
+  title. The prompt sends it to those sources deliberately.
 
 The prompt is explicit about what kills a caption — proverb voice, explaining
 the joke, being about people in general — because without that, models default

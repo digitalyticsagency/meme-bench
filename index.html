@@ -524,24 +524,34 @@
   }
 
   function readPrompt(brief){
-    var brief_ = brief;
+    var urls = exampleUrls();
+    var known = template && template.name;
+
+    var hunt = [
+      'Most meme captions live inside the pixels, and the tools return page text, so you cannot read every instance you find. Go where the wording is written out as text: Know Your Meme entries quote notable examples, article round-ups quote the good ones, and forum and social posts put the caption in the title. Collect the actual wording, verbatim, of at least eight real ones. Titles of real instances count. Descriptions of the format do not.'
+    ].join('');
+
+    var findStep = known
+      ? '2. READ REAL ONES. Open ' + urls[0] + ' with the fetch tool — it lists real ' + template.name + ' instances and the other names people call this format by, which are the terms to search next. Then ' + urls[1] + ' and searches of your own. ' + hunt
+      : '2. FIND THE SAME PICTURE. Search for this exact image and near-identical ones: by what is in the frame, by any words visible in it, by the format name if it has one. ' + hunt + ' If nothing matches this picture at all, say so in "found" and work only from what is in the frame.';
+
     return [
       CRAFT, '',
-      'Work on the attached image, in this order. Use the search tool properly — do not answer from memory.',
+      'Work on the attached image, in this order. Use the tools — do not answer from memory, and do not skip to step 4.',
       '',
-      '1. IDENTIFY IT. ' + templateLine() + ' Search the web for the template by name, and for the phrases that would appear alongside it, until you are sure which format this is and where it came from. If it is an ordinary photograph rather than a known template, say precisely what is in it: the object, its state, what has been done to it, what is missing.',
+      '1. IDENTIFY IT. ' + templateLine() + ' Work out exactly which image this is and where it comes from.',
       '',
-      '2. FIND REAL EXAMPLES. Search for how this exact format is captioned in the wild — the popular instances, what the two halves are doing in each, and which versions people actually shared. Read enough of them to see the pattern.',
+      findStep,
       '',
-      '3. WORK OUT THE MECHANISM. From those examples: what makes a good one land, and what every tired version does. Name it to yourself in one sentence.',
+      '3. ANALYSE WHAT YOU READ. Across the real captions you collected: what is each text box doing, what is the shape of the joke, where does the turn come, how long are the lines, what register do people write in. Say which are the strong ones and what the weak ones have in common. Do this on the examples in front of you, not on a general idea of the format — this step is what decides whether your captions are any good.',
       '',
-      '4. WRITE. Six new captions that run that mechanism on a fresh subject. Do not reuse any example you found, and do not write a variation of one.',
+      '4. WRITE. Six new captions that run the same mechanism on a fresh subject. Do not reuse a subject you read, and do not write a variation of one you read.',
       '',
-      brief_ ? 'Aim them here if it fits the format: ' + brief_ : 'Pick the subject yourself. Something specific and current, not a general observation.',
+      brief ? 'Aim them here if it fits the format: ' + brief : 'Pick the subject yourself. Something specific and current, not a general observation.',
       '',
       'Each line at most 12 words. Funniest first.',
       avoidLine(),
-      'Reply with only a JSON array and nothing after it. Each item is {"lines": [string, ...], "note": string, "found": string}. "lines" holds one string per text box in the template, in order. "note" is a few words on why it lands. "found" is what you identified the image as, the same on every item. Put the strongest first.'
+      'Reply with only a JSON array and nothing after it. Each item is {"lines": [string, ...], "note": string, "found": string, "studied": [string, string, string]}. "lines" holds one string per text box, in order. "note" is a few words on why it lands. "found" is what you identified the image as, the same on every item. "studied" holds three of the real captions you actually read, quoted, the same on every item — if you could not find any, make it an empty array. Put the strongest first.'
     ].join('\n');
   }
 
@@ -577,7 +587,8 @@
         return {
           lines: Array.isArray(r.lines) ? r.lines.map(String) : [String(r.caption)],
           note: typeof r.note === 'string' ? r.note : (r.object || ''),
-          found: typeof r.found === 'string' ? r.found : ''
+          found: typeof r.found === 'string' ? r.found : '',
+          studied: Array.isArray(r.studied) ? r.studied.map(String) : []
         };
       });
   }
@@ -626,6 +637,20 @@
   }
 
   var SEARCH_TOOL = { type: 'web_search_20260209', name: 'web_search', max_uses: 8 };
+  var FETCH_TOOL = { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 8, max_content_tokens: 30000 };
+
+  /* imgflip keeps every template's real captioned examples on one page, and the
+     caption text of each is right there in the markup. web_fetch will only open
+     a URL that is already in the conversation, so it has to be handed over. */
+  function exampleUrls(){
+    var urls = [];
+    if (template && template.name){
+      var slug = template.name.trim().replace(/[^A-Za-z0-9 ]/g, '').replace(/\s+/g, '-');
+      urls.push('https://imgflip.com/meme/' + slug);
+      urls.push('https://knowyourmeme.com/search?q=' + encodeURIComponent(template.name));
+    }
+    return urls;
+  }
 
   /* ---- what is landing: research instead of another gated feed API ---- */
   function trendStatus(msg, ok){
@@ -718,7 +743,7 @@
       output_config: { effort: 'high' },
       messages: [{ role: 'user', content: content }]
     };
-    if (research) payload.tools = [SEARCH_TOOL];
+    if (research) payload.tools = [SEARCH_TOOL, FETCH_TOOL];
 
     callClaude(payload)
     .then(function(text){
@@ -726,8 +751,7 @@
       if (!rows.length) throw new Error('No captions came back. Try a more concrete brief.');
       rows.forEach(function(r){ seen.push(r.lines.join(' / ')); });
       renderIdeas(rows, append);
-      var found = rows[0] && rows[0].found;
-      captionStatus(found ? 'Read as: ' + found : rows.length + ' captions ready, strongest first.', true);
+      reportResearch(rows[0]);
     })
     .catch(function(err){
       captionStatus(err.message);
@@ -737,6 +761,38 @@
       buttons.forEach(function(b){ b.disabled = false; });
       syncImageButton();
     });
+  }
+
+  function reportResearch(first){
+    var el = $('captionStatus');
+    el.className = 'alert ok';
+    el.classList.remove('hidden');
+    el.innerHTML = '';
+
+    if (!first || (!first.found && !(first.studied || []).length)){
+      el.textContent = 'Captions ready, strongest first.';
+      return;
+    }
+
+    var head = document.createElement('div');
+    head.textContent = first.found ? 'Read as: ' + first.found : 'Captions ready, strongest first.';
+    el.appendChild(head);
+
+    if ((first.studied || []).length){
+      var sub = document.createElement('div');
+      sub.style.marginTop = '6px';
+      sub.style.color = 'var(--dim)';
+      sub.textContent = 'Real ones it read: ' + first.studied.slice(0, 3).map(function(t){
+        return '\u201c' + t + '\u201d';
+      }).join('  ·  ');
+      el.appendChild(sub);
+    } else if (first.found) {
+      var miss = document.createElement('div');
+      miss.style.marginTop = '6px';
+      miss.style.color = 'var(--dim)';
+      miss.textContent = 'It found no real captioned examples to read, so these come from the picture alone.';
+      el.appendChild(miss);
+    }
   }
 
   function writeCaptions(append){
