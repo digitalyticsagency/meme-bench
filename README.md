@@ -2,11 +2,9 @@
 
 A single-file web app for making feed-sized caption images. It has two halves:
 
-- **What is climbing** — two sources. **Imgflip templates** (default) ranks the
-  top 100 meme templates by how many captions people made this week, and any of
-  them can be dropped straight onto the canvas as the image. **Reddit** pulls top
-  posts from the subreddits you pick. Either way a title can be pushed into the
-  caption field.
+- **What is climbing** — the top 100 Imgflip templates, ranked by how many
+  captions people made on each this week. Any of them drops straight onto the
+  canvas as the image, and the title can be pushed into the caption field.
 - **Caption studio** — writes captions with Claude, renders the one you pick in
   Archivo 800 over an uploaded or generated image on a 1080 × 1350 canvas, and
   exports it as a PNG.
@@ -39,19 +37,13 @@ Serving over `http://` or `https://` rather than opening the file directly is
 recommended — some browsers block `fetch` from `file://` origins, which breaks
 the Reddit feed.
 
-## Keys and IDs
+## API keys
 
-All optional, all entered under **Settings**. Imgflip needs nothing.
+Two keys, both optional, both entered under **Settings**. The trending feed needs
+neither — Imgflip's endpoint is open.
 
 - **Claude** — writes the captions. Get one at
   [console.anthropic.com](https://console.anthropic.com/settings/keys).
-- **Reddit client ID** — only for the Reddit source. Reddit stopped serving its
-  public `.json` endpoints to browsers (403 with no CORS headers), so the feed
-  now goes through Reddit's OAuth API. Register a free **installed app** at
-  [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps) and paste the ID
-  shown under the app name. Installed apps have no secret, so nothing sensitive
-  is stored — the app fetches a one-hour application-only token with the
-  `installed_client` grant and a random device ID kept in `localStorage`.
 - **Gemini** — generates the images. Get one at
   [aistudio.google.com/apikey](https://aistudio.google.com/apikey). Pick a model:
   Gemini 2.5 Flash Image (default), Gemini 3 Pro Image (preview), or Imagen 4.
@@ -68,16 +60,15 @@ holds the keys and never ship them to the client.
 
 ## Known limitations
 
-- Reddit's anonymous `.json` feed is gone; without a client ID the Reddit source
-  shows a setup message instead of posts. Imgflip works with no setup.
-- Reddit application-only tokens last one hour and carry no refresh token, so the
-  app requests a fresh one when the old one is close to expiring.
 - The canvas draws with `crossOrigin = 'anonymous'`, so a remote image served
   without CORS headers will fail to load rather than tainting the canvas.
 - Claude is called from the browser with the
   `anthropic-dangerous-direct-browser-access` header. That header exists for
   exactly this case — a local tool using your own key — and is the wrong shape
   for anything multi-user.
+- A Reddit source existed briefly. Reddit now answers its public `.json`
+  endpoints with 403 and no CORS headers, and its OAuth path requires an app
+  registration that its own form would not reliably issue, so it was removed.
 
 ## License
 

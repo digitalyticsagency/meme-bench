@@ -162,7 +162,7 @@
   .settings h2{margin-top:0}
   .settings .grid{
     display:grid;
-    grid-template-columns:repeat(3,minmax(0,1fr));
+    grid-template-columns:repeat(2,minmax(0,1fr));
     gap:0 18px;
   }
   @media (max-width:900px){ .settings .grid{grid-template-columns:minmax(0,1fr)} }
@@ -211,19 +211,6 @@
     </div>
 
     <div>
-      <label for="redditId">Reddit app client ID</label>
-      <div class="keyline">
-        <input type="text" id="redditId" placeholder="Ab3dEf..." autocomplete="off" spellcheck="false">
-      </div>
-      <label for="redditSecret">Reddit app secret</label>
-      <div class="keyline">
-        <input type="password" id="redditSecret" placeholder="Leave empty for an installed app" autocomplete="off" spellcheck="false">
-        <button class="ghost" type="button" id="revealReddit">Show</button>
-      </div>
-      <p class="note">Only for the Reddit source. Make an app at <a href="https://www.reddit.com/prefs/apps" target="_blank" rel="noopener">reddit.com/prefs/apps</a> and copy the ID under its name. An <strong>installed app</strong> has no secret — leave that box empty. A <strong>web app</strong> or <strong>script</strong> does; paste it and this page will use it. The secret then sits in your browser, so only do that on a machine you control.</p>
-    </div>
-
-    <div>
       <label for="claudeKey">Claude API key</label>
       <div class="keyline">
         <input type="password" id="claudeKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
@@ -256,22 +243,11 @@
   <section class="col">
     <h2>What is climbing <span id="feedStatus">idle</span></h2>
 
-    <p class="note" id="feedNote">The templates people are actually building on right now, ranked by how many captions were made this week.</p>
+    <p class="note">The templates people are actually building on right now, ranked by how many captions were made this week. Put one on the canvas and Claude can read it.</p>
 
     <div class="row">
-      <select id="source" aria-label="Source">
-        <option value="imgflip" selected>Imgflip templates</option>
-        <option value="reddit">Reddit</option>
-      </select>
-      <select id="window" aria-label="Time window" hidden>
-        <option value="day">Past 24 hours</option>
-        <option value="week" selected>Past week</option>
-        <option value="month">Past month</option>
-      </select>
       <button id="refresh">Refresh feed</button>
     </div>
-
-    <div class="chips" id="subChips" hidden></div>
 
     <div id="feedError" class="alert hidden"></div>
     <ul class="feed" id="feed"></ul>
@@ -333,8 +309,6 @@
   'use strict';
 
   /* ---------------- state ---------------- */
-  var SUBS = ['memes','wholesomememes','MemeEconomy','GetMotivated','coolguides','mildlyinteresting'];
-  var activeSubs = ['memes','GetMotivated'];
   var currentImage = null;
 
   var PRESET_CAPTIONS = [
@@ -356,26 +330,6 @@
   var $ = function(id){ return document.getElementById(id); };
 
   /* ---------------- chips ---------------- */
-  function buildSubChips(){
-    var box = $('subChips');
-    box.innerHTML = '';
-    SUBS.forEach(function(sub){
-      var b = document.createElement('button');
-      b.className = 'chip';
-      b.type = 'button';
-      b.textContent = 'r/' + sub;
-      b.setAttribute('aria-pressed', activeSubs.indexOf(sub) > -1 ? 'true' : 'false');
-      b.addEventListener('click', function(){
-        var i = activeSubs.indexOf(sub);
-        if (i > -1) { if (activeSubs.length > 1) activeSubs.splice(i,1); }
-        else { activeSubs.push(sub); }
-        b.setAttribute('aria-pressed', activeSubs.indexOf(sub) > -1 ? 'true' : 'false');
-        loadFeed();
-      });
-      box.appendChild(b);
-    });
-  }
-
   function buildPresetChips(){
     var cap = $('presetCaptions');
     PRESET_CAPTIONS.forEach(function(text){
@@ -406,21 +360,11 @@
 
   function feedStatus(text){ $('feedStatus').textContent = text; }
 
-  function syncSourceControls(){
-    var reddit = $('source').value === 'reddit';
-    $('subChips').hidden = !reddit;
-    $('window').hidden = !reddit;
-    $('feedNote').textContent = reddit
-      ? 'Top posts from the subreddits you pick, through Reddit\'s OAuth API.'
-      : 'The templates people are actually building on right now, ranked by how many captions were made this week.';
-  }
-
   function loadFeed(){
     $('feedError').classList.add('hidden');
     $('feed').innerHTML = '';
     feedStatus('loading');
-    if ($('source').value === 'reddit') loadReddit();
-    else loadImgflip();
+    loadImgflip();
   }
 
   /* ---- imgflip: no key, no setup ---- */
@@ -447,118 +391,6 @@
         feedStatus('failed');
         showFeedError(err.message + ' Try refreshing.');
       });
-  }
-
-  /* ---- reddit: application-only OAuth ---- */
-  var redditToken = null;
-
-  function deviceId(){
-    var id = null;
-    try { id = localStorage.getItem('memebench:device'); } catch (e) {}
-    if (!id){
-      id = 'dev';
-      for (var i = 0; i < 21; i++) id += 'abcdefghijklmnopqrstuvwxyz0123456789'.charAt(Math.floor(Math.random() * 36));
-      try { localStorage.setItem('memebench:device', id); } catch (e) {}
-    }
-    return id;
-  }
-
-  function redditAuth(){
-    if (redditToken && redditToken.expires > Date.now() + 60000){
-      return Promise.resolve(redditToken.value);
-    }
-    var id = $('redditId').value.trim();
-    var secret = $('redditSecret').value.trim();
-    if (!id) return Promise.reject(new Error('Add your Reddit app client ID in Settings to use this source. Reddit stopped serving its public JSON feed to browsers.'));
-
-    // Installed apps are public clients and use the installed_client grant.
-    // Web apps and scripts are confidential and want client_credentials plus the secret.
-    var body = secret
-      ? 'grant_type=client_credentials'
-      : 'grant_type=' + encodeURIComponent('https://oauth.reddit.com/grants/installed_client') +
-        '&device_id=' + encodeURIComponent(deviceId());
-
-    return fetch('https://www.reddit.com/api/v1/access_token', {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Basic ' + btoa(id + ':' + secret),
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: body
-    })
-    .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, body: j }; }); })
-    .then(function(res){
-      if (!res.ok || !res.body.access_token){
-        throw new Error(res.body && res.body.error === 401
-          ? (secret
-              ? 'Reddit rejected that ID and secret. Check both are copied from the same app.'
-              : 'Reddit rejected that client ID. If reddit.com/prefs/apps shows the app as a web app or script rather than an installed app, it needs its secret pasted in Settings too.')
-          : 'Reddit would not issue a token.');
-      }
-      redditToken = {
-        value: res.body.access_token,
-        expires: Date.now() + (res.body.expires_in || 3600) * 1000
-      };
-      return redditToken.value;
-    });
-  }
-
-  function loadReddit(){
-    var win = $('window').value;
-
-    redditAuth().then(function(token){
-      var jobs = activeSubs.map(function(sub){
-        var url = 'https://oauth.reddit.com/r/' + sub + '/top?t=' + win + '&limit=25&raw_json=1';
-        return fetch(url, { headers: { 'Authorization': 'bearer ' + token } })
-          .then(function(r){ if (!r.ok) throw new Error(r.status); return r.json(); })
-          .then(function(j){
-            return (j.data && j.data.children ? j.data.children : []).map(function(c){ return c.data; });
-          })
-          .catch(function(){ return []; });
-      });
-
-      return Promise.all(jobs).then(function(sets){
-        var all = [];
-        sets.forEach(function(set){ all = all.concat(set); });
-
-        all = all.filter(function(p){
-          return p && !p.over_18 && !p.stickied && p.post_hint !== 'hosted:video';
-        });
-        all.sort(function(a,b){ return (b.score||0) - (a.score||0); });
-
-        var rows = all.slice(0, 30).map(function(p){
-          return {
-            title: p.title,
-            score: p.score || 0,
-            unit: 'upvotes',
-            meta: 'r/' + p.subreddit + '  ' + (p.num_comments||0) + ' comments',
-            link: 'https://www.reddit.com' + p.permalink,
-            thumb: pickThumb(p),
-            image: null
-          };
-        });
-
-        if (!rows.length){
-          feedStatus('no results');
-          showFeedError('Nothing came back from those subreddits. Try another time window.');
-          return;
-        }
-        feedStatus(rows.length + ' posts');
-        renderFeed(rows);
-      });
-    })
-    .catch(function(err){
-      feedStatus('needs setup');
-      showFeedError(err.message);
-    });
-  }
-
-  function pickThumb(p){
-    if (p.thumbnail && p.thumbnail.indexOf('http') === 0) return p.thumbnail;
-    if (p.preview && p.preview.images && p.preview.images[0]) {
-      return p.preview.images[0].source.url;
-    }
-    return '';
   }
 
   /* ---- shared rendering ---- */
@@ -944,9 +776,7 @@
       model: $('model').value,
       remember: remember,
       key: remember ? $('apiKey').value.trim() : '',
-      claudeKey: remember ? $('claudeKey').value.trim() : '',
-      redditId: $('redditId').value.trim(),
-      redditSecret: remember ? $('redditSecret').value.trim() : ''
+      claudeKey: remember ? $('claudeKey').value.trim() : ''
     };
     try {
       if (remember) {
@@ -975,8 +805,6 @@
       $('rememberKey').checked = !!s.remember;
       if (s.key) $('apiKey').value = s.key;
       if (s.claudeKey) $('claudeKey').value = s.claudeKey;
-      if (s.redditId) $('redditId').value = s.redditId;
-      if (s.redditSecret) $('redditSecret').value = s.redditSecret;
     } catch (e) {}
     markKeyState();
   }
@@ -999,13 +827,6 @@
     this.textContent = showing ? 'Show' : 'Hide';
   });
 
-  $('revealReddit').addEventListener('click', function(){
-    var f = $('redditSecret');
-    var showing = f.type === 'text';
-    f.type = showing ? 'password' : 'text';
-    this.textContent = showing ? 'Show' : 'Hide';
-  });
-
   $('revealClaude').addEventListener('click', function(){
     var f = $('claudeKey');
     var showing = f.type === 'text';
@@ -1016,7 +837,6 @@
   $('clearKey').addEventListener('click', function(){
     $('apiKey').value = '';
     $('claudeKey').value = '';
-    $('redditSecret').value = '';
     $('rememberKey').checked = false;
     markKeyState();
     try {
@@ -1028,10 +848,6 @@
 
   /* ---------------- wiring ---------------- */
   $('refresh').addEventListener('click', loadFeed);
-  $('window').addEventListener('change', loadFeed);
-  $('source').addEventListener('change', function(){ syncSourceControls(); loadFeed(); });
-  $('redditId').addEventListener('input', function(){ redditToken = null; });
-  $('redditSecret').addEventListener('input', function(){ redditToken = null; });
   $('caption').addEventListener('input', draw);
   $('generate').addEventListener('click', generate);
   $('writeCaptions').addEventListener('click', function(){ writeCaptions(false); });
@@ -1060,8 +876,6 @@
     a.click();
   });
 
-  buildSubChips();
-  syncSourceControls();
   buildPresetChips();
   loadSettings();
 
