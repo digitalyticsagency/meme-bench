@@ -215,7 +215,12 @@
       <div class="keyline">
         <input type="text" id="redditId" placeholder="Ab3dEf..." autocomplete="off" spellcheck="false">
       </div>
-      <p class="note">Only needed for the Reddit source. Create a free <strong>installed app</strong> at <a href="https://www.reddit.com/prefs/apps" target="_blank" rel="noopener">reddit.com/prefs/apps</a> and copy the ID under its name. There is no secret to paste — installed apps do not have one.</p>
+      <label for="redditSecret">Reddit app secret</label>
+      <div class="keyline">
+        <input type="password" id="redditSecret" placeholder="Leave empty for an installed app" autocomplete="off" spellcheck="false">
+        <button class="ghost" type="button" id="revealReddit">Show</button>
+      </div>
+      <p class="note">Only for the Reddit source. Make an app at <a href="https://www.reddit.com/prefs/apps" target="_blank" rel="noopener">reddit.com/prefs/apps</a> and copy the ID under its name. An <strong>installed app</strong> has no secret — leave that box empty. A <strong>web app</strong> or <strong>script</strong> does; paste it and this page will use it. The secret then sits in your browser, so only do that on a machine you control.</p>
     </div>
 
     <div>
@@ -462,15 +467,20 @@
       return Promise.resolve(redditToken.value);
     }
     var id = $('redditId').value.trim();
+    var secret = $('redditSecret').value.trim();
     if (!id) return Promise.reject(new Error('Add your Reddit app client ID in Settings to use this source. Reddit stopped serving its public JSON feed to browsers.'));
 
-    var body = 'grant_type=' + encodeURIComponent('https://oauth.reddit.com/grants/installed_client') +
-               '&device_id=' + encodeURIComponent(deviceId());
+    // Installed apps are public clients and use the installed_client grant.
+    // Web apps and scripts are confidential and want client_credentials plus the secret.
+    var body = secret
+      ? 'grant_type=client_credentials'
+      : 'grant_type=' + encodeURIComponent('https://oauth.reddit.com/grants/installed_client') +
+        '&device_id=' + encodeURIComponent(deviceId());
 
     return fetch('https://www.reddit.com/api/v1/access_token', {
       method: 'POST',
       headers: {
-        'Authorization': 'Basic ' + btoa(id + ':'),
+        'Authorization': 'Basic ' + btoa(id + ':' + secret),
         'Content-Type': 'application/x-www-form-urlencoded'
       },
       body: body
@@ -479,7 +489,9 @@
     .then(function(res){
       if (!res.ok || !res.body.access_token){
         throw new Error(res.body && res.body.error === 401
-          ? 'Reddit rejected that client ID. Check it is an installed app and the ID is copied from under the app name.'
+          ? (secret
+              ? 'Reddit rejected that ID and secret. Check both are copied from the same app.'
+              : 'Reddit rejected that client ID. If reddit.com/prefs/apps shows the app as a web app or script rather than an installed app, it needs its secret pasted in Settings too.')
           : 'Reddit would not issue a token.');
       }
       redditToken = {
@@ -880,7 +892,8 @@
       remember: remember,
       key: remember ? $('apiKey').value.trim() : '',
       claudeKey: remember ? $('claudeKey').value.trim() : '',
-      redditId: $('redditId').value.trim()
+      redditId: $('redditId').value.trim(),
+      redditSecret: remember ? $('redditSecret').value.trim() : ''
     };
     try {
       if (remember) {
@@ -910,6 +923,7 @@
       if (s.key) $('apiKey').value = s.key;
       if (s.claudeKey) $('claudeKey').value = s.claudeKey;
       if (s.redditId) $('redditId').value = s.redditId;
+      if (s.redditSecret) $('redditSecret').value = s.redditSecret;
     } catch (e) {}
     markKeyState();
   }
@@ -932,6 +946,13 @@
     this.textContent = showing ? 'Show' : 'Hide';
   });
 
+  $('revealReddit').addEventListener('click', function(){
+    var f = $('redditSecret');
+    var showing = f.type === 'text';
+    f.type = showing ? 'password' : 'text';
+    this.textContent = showing ? 'Show' : 'Hide';
+  });
+
   $('revealClaude').addEventListener('click', function(){
     var f = $('claudeKey');
     var showing = f.type === 'text';
@@ -942,6 +963,7 @@
   $('clearKey').addEventListener('click', function(){
     $('apiKey').value = '';
     $('claudeKey').value = '';
+    $('redditSecret').value = '';
     $('rememberKey').checked = false;
     markKeyState();
     try {
@@ -955,6 +977,8 @@
   $('refresh').addEventListener('click', loadFeed);
   $('window').addEventListener('change', loadFeed);
   $('source').addEventListener('change', function(){ syncSourceControls(); loadFeed(); });
+  $('redditId').addEventListener('input', function(){ redditToken = null; });
+  $('redditSecret').addEventListener('input', function(){ redditToken = null; });
   $('caption').addEventListener('input', draw);
   $('generate').addEventListener('click', generate);
   $('writeCaptions').addEventListener('click', function(){ writeCaptions(false); });
