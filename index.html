@@ -559,7 +559,7 @@
 
     return [
       CRAFT, '',
-      'Work on the attached image, in this order. Use the tools — do not answer from memory, and do not skip to step 4.',
+      'Work on the attached image, in this order. Use the tools — do not answer from memory, and do not skip to step 4. Do steps 1 to 3 without writing them out: your visible reply is the JSON array and nothing else, no working, no commentary, no preamble.',
       '',
       '1. IDENTIFY IT. ' + templateLine() + ' Work out exactly which image this is and where it comes from.',
       '',
@@ -647,6 +647,13 @@
     inFlight = controller;
     payload.stream = true;
 
+    var overran = false;
+    var limit = setTimeout(function(){
+      overran = true;
+      controller.abort();
+    }, 240000);
+    var clear = function(){ clearTimeout(limit); };
+
     return fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       signal: controller.signal,
@@ -659,7 +666,11 @@
       body: JSON.stringify(payload)
     })
     .catch(function(err){
-      if (err && err.name === 'AbortError') throw err;
+      clear();
+      if (err && err.name === 'AbortError'){
+        if (overran) throw new Error('Gave up after four minutes. Claude was still going. Try again, or narrow the brief so it has less to read.');
+        throw err;
+      }
       /* fetch rejects before any response: the request never left the browser
          or never came back. Nothing about the key or the prompt is at fault. */
       throw new Error(networkHint());
@@ -673,12 +684,17 @@
       return readStream(r, onProgress);
     })
     .then(function(result){
+      clear();
       inFlight = null;
       if (result.stopReason === 'refusal') throw new Error('Claude declined this one. Try wording it differently.');
       if (!result.text.trim()) throw new Error('Claude finished without writing anything. Try again.');
       return result.text;
     }, function(err){
+      clear();
       inFlight = null;
+      if (err && err.name === 'AbortError' && overran){
+        throw new Error('Gave up after four minutes. Claude was still going. Try again, or narrow the brief so it has less to read.');
+      }
       throw err;
     });
   }
@@ -695,12 +711,17 @@
     var stopReason = null;
     var searches = 0, fetches = 0;
 
-    function announce(){
+    var lastSaid = 0;
+    function announce(force){
       if (!onProgress) return;
-      if (text) onProgress('writing');
-      else if (fetches) onProgress('reading ' + fetches + ' page' + (fetches === 1 ? '' : 's'));
-      else if (searches) onProgress('searching, ' + searches + ' so far');
-      else onProgress('looking at the image');
+      var now = Date.now();
+      if (!force && now - lastSaid < 400) return;
+      lastSaid = now;
+      var bits = [];
+      if (searches) bits.push(searches + ' search' + (searches === 1 ? '' : 'es'));
+      if (fetches) bits.push(fetches + ' page' + (fetches === 1 ? '' : 's') + ' read');
+      if (text) bits.push(text.length + ' characters written');
+      onProgress(bits.length ? bits.join(', ') : 'looking at the image');
     }
 
     function handle(evt){
@@ -712,7 +733,7 @@
         if (kind === 'server_tool_use'){
           if (evt.content_block.name === 'web_fetch') fetches++;
           else searches++;
-          announce();
+          announce(true);
         }
       }
       if (evt.type === 'content_block_delta' && evt.delta && evt.delta.type === 'text_delta'){
@@ -870,13 +891,13 @@
 
     var payload = {
       model: CAPTION_MODEL,
-      max_tokens: 8000,
-      output_config: { effort: 'high' },
+      max_tokens: 4000,
+      output_config: { effort: research ? 'medium' : 'high' },
       messages: [{ role: 'user', content: content }]
     };
     if (research) payload.tools = [SEARCH_TOOL, FETCH_TOOL];
 
-    callClaude(payload, function(stage){ setState(research ? 'Reading real examples — ' + stage : 'Writing'); })
+    callClaude(payload, function(stage){ setState(research ? 'Researching: ' + stage : 'Writing'); })
     .then(function(text){
       var rows = parseCaptions(text);
       if (!rows.length) throw new Error('No captions came back. Try a more concrete brief.');
