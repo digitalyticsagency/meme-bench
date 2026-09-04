@@ -2,10 +2,12 @@
 
 A single-file web app for making feed-sized caption images. It has two halves:
 
-- **What is climbing** — two sources. **Imgflip templates** ranks the top 100
-  meme templates by how many captions people made on each this week; any of them
-  drops onto the canvas, carrying its name and text-box count with it.
-  **Imgur** shows the most viral posts of the moment, for ideas.
+- **What is climbing** — the top 100 Imgflip templates, ranked by how many
+  captions people made on each this week. Any of them drops onto the canvas,
+  carrying its name and text-box count with it. **Ask Claude what is landing**
+  answers the same question by searching the web instead: six formats in use
+  right now, with the joke structure each carries. Formats the feed also stocks
+  get a button to load straight onto the canvas.
 - **Caption studio** — writes captions with Claude, renders the one you pick in
   Archivo 800 over an uploaded or generated image on a 1080 × 1350 canvas, and
   exports it as a PNG.
@@ -17,11 +19,13 @@ Captions come from the Claude API (`claude-opus-5`) two ways:
   already wrote, so the list keeps going without repeating. Picking a caption
   loads a matching image prompt.
 - **From the image** — with a picture on the canvas, **Read the image** sends it
-  to Claude along with the web search tool. Claude identifies the template,
-  searches for how it is actually used and what the joke structure carries,
-  works out the mechanism, then writes six new captions using it. Funniest
-  first, one line per text box. The image is downsized to 1024px and sent as
-  JPEG; the round trip takes around half a minute because of the searching.
+  to Claude with the web search tool and a four-step instruction: identify the
+  template by searching for it, find real captioned examples in the wild, name
+  the mechanism that makes good ones land, then write six new captions running
+  that mechanism on a fresh subject. It reports back what it identified the
+  image as, so you can see the research happened. Funniest first, one line per
+  text box. The image is downsized to 1024px and sent as JPEG; the round trip
+  takes around half a minute because of the searching.
 
 The prompt is explicit about what kills a caption — proverb voice, explaining
 the joke, being about people in general — because without that, models default
@@ -57,15 +61,11 @@ the Reddit feed.
 
 ## API keys
 
-Two keys, both optional, both entered under **Settings**. The trending feed needs
-neither — Imgflip's endpoint is open.
+One key, entered under **Settings**, plus an optional one. The Imgflip feed needs
+neither — its endpoint is open.
 
 - **Claude** — writes the captions. Get one at
   [console.anthropic.com](https://console.anthropic.com/settings/keys).
-- **Imgur client ID** — only for the Imgur source. Register at
-  [api.imgur.com](https://api.imgur.com/oauth2/addclient), choose *anonymous
-  usage without user authorization*, copy the Client ID. Issued immediately, not
-  a secret.
 - **Gemini** — generates the images. Get one at
   [aistudio.google.com/apikey](https://aistudio.google.com/apikey). Pick a model:
   Gemini 2.5 Flash Image (default), Gemini 3 Pro Image (preview), or Imagen 4.
@@ -88,9 +88,13 @@ holds the keys and never ship them to the client.
   `anthropic-dangerous-direct-browser-access` header. That header exists for
   exactly this case — a local tool using your own key — and is the wrong shape
   for anything multi-user.
-- A Reddit source existed briefly. Reddit now answers its public `.json`
-  endpoints with 403 and no CORS headers, and its OAuth path requires an app
-  registration that its own form would not reliably issue, so it was removed.
+- Two other feed sources were tried and removed. Reddit answers its public
+  `.json` endpoints with 403 and no CORS headers, and its OAuth path needs an app
+  registration its own form would not reliably issue. Imgur has taken down
+  self-serve registration entirely — `api.imgur.com/oauth2/addclient`, still
+  linked from Imgur's own docs, 301s to the homepage, and the account settings
+  page lists only apps you have authorised, with no way to create one. Web search
+  through Claude replaced both: no key of its own, no registration, no CORS.
 
 ## License
 

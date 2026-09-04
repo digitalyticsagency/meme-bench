@@ -163,7 +163,7 @@
   .settings h2{margin-top:0}
   .settings .grid{
     display:grid;
-    grid-template-columns:repeat(3,minmax(0,1fr));
+    grid-template-columns:repeat(2,minmax(0,1fr));
     gap:0 18px;
   }
   @media (max-width:900px){ .settings .grid{grid-template-columns:minmax(0,1fr)} }
@@ -212,14 +212,6 @@
     </div>
 
     <div>
-      <label for="imgurId">Imgur client ID</label>
-      <div class="keyline">
-        <input type="text" id="imgurId" placeholder="Optional" autocomplete="off" spellcheck="false">
-      </div>
-      <p class="note">Only for the Imgur source. Register at <a href="https://api.imgur.com/oauth2/addclient" target="_blank" rel="noopener">api.imgur.com</a>, pick <strong>anonymous usage without user authorization</strong>, and copy the Client ID. It is issued immediately and is not a secret.</p>
-    </div>
-
-    <div>
       <label for="claudeKey">Claude API key</label>
       <div class="keyline">
         <input type="password" id="claudeKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
@@ -252,15 +244,15 @@
   <section class="col">
     <h2>What is climbing <span id="feedStatus">idle</span></h2>
 
-    <p class="note">The templates people are actually building on right now, ranked by how many captions were made this week. Put one on the canvas and Claude can read it.</p>
+    <p class="note">The templates people are actually building on right now, ranked by how many captions were made this week. Put one on the canvas and Claude can read it. Or ask what is landing right now — that answer comes from a web search, not a feed.</p>
 
     <div class="row">
-      <select id="source" aria-label="Source">
-        <option value="imgflip" selected>Imgflip templates</option>
-        <option value="imgur">Imgur, most viral</option>
-      </select>
       <button id="refresh">Refresh feed</button>
+      <button class="ghost" id="findFormats">Ask Claude what is landing</button>
     </div>
+
+    <div id="trendStatus" class="alert hidden"></div>
+    <ul class="ideas" id="trends"></ul>
 
     <div id="feedError" class="alert hidden"></div>
     <ul class="feed" id="feed"></ul>
@@ -385,12 +377,12 @@
     $('feedError').classList.add('hidden');
     $('feed').innerHTML = '';
     feedStatus('loading');
-    if ($('source').value === 'imgur') loadImgur();
-    else loadImgflip();
+    loadImgflip();
   }
 
   /* What Claude is told about the picture, when the feed knows it. */
   var template = null;
+  var knownTemplates = [];
 
   /* ---- imgflip: no key, no setup ---- */
   function loadImgflip(){
@@ -410,60 +402,13 @@
             template: { name: m.name, boxes: m.box_count || 1, source: 'Imgflip' }
           };
         });
+        knownTemplates = rows;
         feedStatus(rows.length + ' templates');
         renderFeed(rows);
       })
       .catch(function(err){
         feedStatus('failed');
         showFeedError(err.message + ' Try refreshing.');
-      });
-  }
-
-  /* ---- imgur: needs a free client ID ---- */
-  function loadImgur(){
-    var id = $('imgurId').value.trim();
-    if (!id){
-      feedStatus('needs setup');
-      showFeedError('Add an Imgur client ID in Settings. Registration at api.imgur.com is instant — pick anonymous usage, no approval, no secret.');
-      return;
-    }
-
-    fetch('https://api.imgur.com/3/gallery/hot/viral/0.json', {
-      headers: { 'Authorization': 'Client-ID ' + id }
-    })
-      .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, body: j }; }); })
-      .then(function(res){
-        if (!res.ok || !res.body.success){
-          throw new Error(res.body && res.body.data && res.body.data.error
-            ? 'Imgur said: ' + res.body.data.error
-            : 'Imgur would not answer.');
-        }
-        var rows = (res.body.data || [])
-          .filter(function(p){ return p && !p.nsfw && !p.is_album && /^image\/(jpeg|png|gif)$/.test(p.type || ''); })
-          .slice(0, 30)
-          .map(function(p){
-            return {
-              title: p.title || 'Untitled',
-              score: p.points || p.ups || 0,
-              unit: 'points',
-              meta: (p.views || 0).toLocaleString() + ' views',
-              link: p.link.replace(/\.[a-z]+$/, '').replace('i.imgur.com', 'imgur.com'),
-              thumb: p.link,
-              image: null,
-              template: null
-            };
-          });
-        if (!rows.length){
-          feedStatus('no results');
-          showFeedError('Imgur returned nothing this page could use. Try refreshing.');
-          return;
-        }
-        feedStatus(rows.length + ' posts');
-        renderFeed(rows);
-      })
-      .catch(function(err){
-        feedStatus('failed');
-        showFeedError(err.message);
       });
   }
 
@@ -579,24 +524,29 @@
   }
 
   function readPrompt(brief){
+    var brief_ = brief;
     return [
       CRAFT, '',
-      'Work on the attached image, in this order.',
+      'Work on the attached image, in this order. Use the search tool properly — do not answer from memory.',
       '',
-      '1. Identify it. ' + templateLine() + ' Search the web for how this template is actually used — real examples, the joke structure it carries, what the two halves are usually doing. If it is a photograph rather than a known template, describe precisely what is in it: the object, its state, what has been done to it, what is missing.',
-      '2. From the examples you find, work out the mechanism: what makes a good one of these land, and what the tired versions all do. Do not copy any example.',
-      '3. Then write 6 new captions that use that mechanism on a fresh subject.',
+      '1. IDENTIFY IT. ' + templateLine() + ' Search the web for the template by name, and for the phrases that would appear alongside it, until you are sure which format this is and where it came from. If it is an ordinary photograph rather than a known template, say precisely what is in it: the object, its state, what has been done to it, what is missing.',
       '',
-      brief ? 'Aim them at this if it fits the format: ' + brief : 'Pick the subject yourself. Something specific and current, not a generic observation.',
+      '2. FIND REAL EXAMPLES. Search for how this exact format is captioned in the wild — the popular instances, what the two halves are doing in each, and which versions people actually shared. Read enough of them to see the pattern.',
+      '',
+      '3. WORK OUT THE MECHANISM. From those examples: what makes a good one land, and what every tired version does. Name it to yourself in one sentence.',
+      '',
+      '4. WRITE. Six new captions that run that mechanism on a fresh subject. Do not reuse any example you found, and do not write a variation of one.',
+      '',
+      brief_ ? 'Aim them here if it fits the format: ' + brief_ : 'Pick the subject yourself. Something specific and current, not a general observation.',
       '',
       'Each line at most 12 words. Funniest first.',
       avoidLine(),
-      SHAPE
+      'Reply with only a JSON array and nothing after it. Each item is {"lines": [string, ...], "note": string, "found": string}. "lines" holds one string per text box in the template, in order. "note" is a few words on why it lands. "found" is what you identified the image as, the same on every item. Put the strongest first.'
     ].join('\n');
   }
 
   /* Claude may narrate before the JSON, so take the last complete array. */
-  function parseCaptions(text){
+  function parseJsonArray(text){
     var end = text.lastIndexOf(']');
     while (end > -1){
       var depth = 0;
@@ -607,14 +557,7 @@
           if (depth === 0){
             try {
               var rows = JSON.parse(text.slice(i, end + 1));
-              if (Array.isArray(rows) && rows.length) return rows.filter(function(r){
-                return r && (Array.isArray(r.lines) ? r.lines.length : typeof r.caption === 'string');
-              }).map(function(r){
-                return {
-                  lines: Array.isArray(r.lines) ? r.lines.map(String) : [String(r.caption)],
-                  note: typeof r.note === 'string' ? r.note : (r.object || '')
-                };
-              });
+              if (Array.isArray(rows) && rows.length) return rows;
             } catch (e) { /* keep looking */ }
             break;
           }
@@ -622,7 +565,21 @@
       }
       end = text.lastIndexOf(']', end - 1);
     }
-    throw new Error('Claude did not return a caption list. Try again.');
+    throw new Error('Claude did not answer in the shape this page reads. Try again.');
+  }
+
+  function parseCaptions(text){
+    return parseJsonArray(text)
+      .filter(function(r){
+        return r && (Array.isArray(r.lines) ? r.lines.length : typeof r.caption === 'string');
+      })
+      .map(function(r){
+        return {
+          lines: Array.isArray(r.lines) ? r.lines.map(String) : [String(r.caption)],
+          note: typeof r.note === 'string' ? r.note : (r.object || ''),
+          found: typeof r.found === 'string' ? r.found : ''
+        };
+      });
   }
 
   /* The picture Claude is shown: the source image, not the composed canvas. */
@@ -645,10 +602,110 @@
     };
   }
 
-  function askForCaptions(content, append, research){
+  function callClaude(payload){
     var key = $('claudeKey').value.trim();
-    if (!key) { captionStatus('Add your Claude API key in Settings first.'); openSettings(); return; }
+    if (!key) return Promise.reject(new Error('Add your Claude API key in Settings first.'));
 
+    return fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify(payload)
+    })
+    .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, body: j }; }); })
+    .then(function(res){
+      if (!res.ok) throw new Error(res.body && res.body.error ? res.body.error.message : 'Request failed.');
+      if (res.body.stop_reason === 'refusal') throw new Error('Claude declined this one. Try wording it differently.');
+      return (res.body.content || []).filter(function(b){ return b.type === 'text'; })
+                                     .map(function(b){ return b.text; }).join('\n');
+    });
+  }
+
+  var SEARCH_TOOL = { type: 'web_search_20260209', name: 'web_search', max_uses: 8 };
+
+  /* ---- what is landing: research instead of another gated feed API ---- */
+  function trendStatus(msg, ok){
+    var el = $('trendStatus');
+    el.textContent = msg;
+    el.className = 'alert' + (ok ? ' ok' : '');
+    el.classList.remove('hidden');
+  }
+
+  function matchTemplate(name){
+    if (!name) return null;
+    var want = String(name).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!want) return null;
+    for (var i = 0; i < knownTemplates.length; i++){
+      var have = knownTemplates[i].title.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (have === want || have.indexOf(want) > -1 || want.indexOf(have) > -1) return knownTemplates[i];
+    }
+    return null;
+  }
+
+  function findFormats(){
+    var btn = $('findFormats');
+    btn.disabled = true;
+    trendStatus('Searching for what is landing right now. Around half a minute.', true);
+
+    var prompt = [
+      'Search the web for which meme formats are actually being used and shared right now, this month. Look at what people are posting, not listicles of all-time classics.',
+      '',
+      'Report 6. For each: the format name as people say it, one line on the joke structure it carries, and one line on what it is currently being used for.',
+      '',
+      'Reply with only a JSON array and nothing after it. Each item is {"name": string, "structure": string, "using": string}. Strongest first.'
+    ].join('\n');
+
+    callClaude({
+      model: CAPTION_MODEL,
+      max_tokens: 8000,
+      output_config: { effort: 'high' },
+      tools: [SEARCH_TOOL],
+      messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }]
+    })
+    .then(function(text){
+      var rows = parseJsonArray(text);
+      var list = $('trends');
+      list.innerHTML = '';
+      rows.forEach(function(r){
+        if (!r || !r.name) return;
+        var hit = matchTemplate(r.name);
+        var li = document.createElement('li');
+
+        var p = document.createElement('p');
+        p.textContent = r.name;
+        var note = document.createElement('span');
+        note.className = 'shot';
+        note.textContent = [r.structure, r.using].filter(Boolean).join(' — ');
+        p.appendChild(note);
+
+        li.appendChild(p);
+        if (hit){
+          var use = document.createElement('button');
+          use.className = 'ghost';
+          use.type = 'button';
+          use.textContent = 'Put on canvas';
+          use.addEventListener('click', function(){
+            template = hit.template;
+            loadImage(hit.image);
+          });
+          li.appendChild(use);
+        }
+        list.appendChild(li);
+      });
+      trendStatus(rows.length + ' formats, researched from this month. Ones the feed also has get a button.', true);
+    })
+    .catch(function(err){
+      trendStatus(err.message);
+      if (/API key/.test(err.message)) openSettings();
+    })
+    .then(function(){ btn.disabled = false; });
+  }
+
+  function askForCaptions(content, append, research){
     var buttons = [$('writeCaptions'), $('moreCaptions'), $('readImage')];
     buttons.forEach(function(b){ b.disabled = true; });
     captionStatus(research
@@ -661,37 +718,21 @@
       output_config: { effort: 'high' },
       messages: [{ role: 'user', content: content }]
     };
-    if (research){
-      payload.tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: 6 }];
-    }
+    if (research) payload.tools = [SEARCH_TOOL];
 
-    fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify(payload)
-    })
-    .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, body: j }; }); })
-    .then(function(res){
-      if (!res.ok) {
-        throw new Error(res.body && res.body.error ? res.body.error.message : 'Request failed.');
-      }
-      if (res.body.stop_reason === 'refusal') {
-        throw new Error('Claude declined this one. Try wording it differently.');
-      }
-      var text = (res.body.content || []).filter(function(b){ return b.type === 'text'; })
-                                         .map(function(b){ return b.text; }).join('\n');
+    callClaude(payload)
+    .then(function(text){
       var rows = parseCaptions(text);
       if (!rows.length) throw new Error('No captions came back. Try a more concrete brief.');
       rows.forEach(function(r){ seen.push(r.lines.join(' / ')); });
       renderIdeas(rows, append);
-      captionStatus(rows.length + ' captions ready, strongest first.', true);
+      var found = rows[0] && rows[0].found;
+      captionStatus(found ? 'Read as: ' + found : rows.length + ' captions ready, strongest first.', true);
     })
-    .catch(function(err){ captionStatus(err.message); })
+    .catch(function(err){
+      captionStatus(err.message);
+      if (/API key/.test(err.message)) openSettings();
+    })
     .then(function(){
       buttons.forEach(function(b){ b.disabled = false; });
       syncImageButton();
@@ -968,8 +1009,7 @@
       model: $('model').value,
       remember: remember,
       key: remember ? $('apiKey').value.trim() : '',
-      claudeKey: remember ? $('claudeKey').value.trim() : '',
-      imgurId: $('imgurId').value.trim()
+      claudeKey: remember ? $('claudeKey').value.trim() : ''
     };
     try {
       if (remember) {
@@ -998,7 +1038,6 @@
       $('rememberKey').checked = !!s.remember;
       if (s.key) $('apiKey').value = s.key;
       if (s.claudeKey) $('claudeKey').value = s.claudeKey;
-      if (s.imgurId) $('imgurId').value = s.imgurId;
     } catch (e) {}
     markKeyState();
   }
@@ -1044,11 +1083,11 @@
   $('refresh').addEventListener('click', loadFeed);
   $('caption').addEventListener('input', draw);
   $('style').addEventListener('change', draw);
-  $('source').addEventListener('change', loadFeed);
   $('generate').addEventListener('click', generate);
   $('writeCaptions').addEventListener('click', function(){ writeCaptions(false); });
   $('moreCaptions').addEventListener('click', function(){ writeCaptions(true); });
   $('readImage').addEventListener('click', readImage);
+  $('findFormats').addEventListener('click', findFormats);
 
   $('upload').addEventListener('change', function(e){
     var f = e.target.files && e.target.files[0];
