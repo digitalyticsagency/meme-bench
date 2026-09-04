@@ -291,6 +291,7 @@
     <div class="row">
       <button id="writeCaptions">Write 6 captions</button>
       <button class="ghost" id="moreCaptions">6 more</button>
+      <button class="ghost" id="readImage" disabled>Read the image</button>
     </div>
     <div id="captionStatus" class="alert hidden"></div>
     <ul class="ideas" id="ideas"></ul>
@@ -630,20 +631,35 @@
     el.classList.remove('hidden');
   }
 
-  function captionPrompt(brief, avoid){
-    var lines = [
-      'You write single-line captions for image posts. The format is one plain object photographed on white, with one line of type above it. The line names a pattern in how people live; the object is the metaphor. No jokes, no explanation, no hashtags, no emoji, no quotation marks.',
+  var HOUSE_STYLE = 'You write single-line captions for image posts. The format is one plain object photographed on white, with one line of type above it. The line names a pattern in how people live; the object is the metaphor. No jokes, no explanation, no hashtags, no emoji, no quotation marks.';
+  var SHAPE = 'Reply with only a JSON array of {"caption": string, "object": string} objects and nothing else.';
+
+  function avoidLine(){
+    return seen.length
+      ? 'Do not repeat or rephrase any of these: ' + seen.slice(-30).join(' | ') + '\n\n'
+      : '';
+  }
+
+  function briefPrompt(brief){
+    return [
+      HOUSE_STYLE, '',
+      'Brief: ' + brief, '',
+      'Write 6. Each caption is at most 9 words. For each, name the single object that would sit under it, in a short phrase.', '',
+      avoidLine() + SHAPE
+    ].join('\n');
+  }
+
+  function imageReadPrompt(brief){
+    return [
+      HOUSE_STYLE, '',
+      'Look at the attached image. First work out what is literally in it: the object, what state it is in, what has been done to it, what is missing. The caption has to land against that specific detail, not against a generic version of the object. If something in the picture is slightly wrong or interrupted, that is usually where the line is.',
       '',
-      'Brief: ' + brief,
+      brief ? 'Angle to push toward, if it fits what you see: ' + brief : 'No brief. Let the image decide the subject.',
       '',
-      'Write 6. Each caption is at most 9 words. For each, name the single object that would sit under it, in a short phrase.',
+      'Write 6 captions for this exact image. Each is at most 9 words. Rank them so the sharpest is first. For each, put in "object" the detail in the picture the line is reading.',
       '',
-      'Reply with only a JSON array of {"caption": string, "object": string} objects and nothing else.'
-    ];
-    if (avoid.length){
-      lines.splice(4, 0, 'Do not repeat or rephrase any of these: ' + avoid.join(' | '), '');
-    }
-    return lines.join('\n');
+      avoidLine() + SHAPE
+    ].join('\n');
   }
 
   function parseCaptions(text){
@@ -654,14 +670,33 @@
     return rows.filter(function(r){ return r && typeof r.caption === 'string'; });
   }
 
-  function writeCaptions(append){
-    var key = $('claudeKey').value.trim();
-    var brief = $('brief').value.trim();
-    if (!key) { captionStatus('Add your Claude API key in Settings first.'); openSettings(); return; }
-    if (!brief) { captionStatus('Say what the captions should be about first.'); return; }
+  /* The picture Claude is shown: the source image, not the composed canvas,
+     downsized so the request stays small. */
+  function imageBlock(){
+    if (!currentImage) return null;
+    var max = 1024;
+    var scale = Math.min(1, max / Math.max(currentImage.width, currentImage.height));
+    var off = document.createElement('canvas');
+    off.width = Math.round(currentImage.width * scale);
+    off.height = Math.round(currentImage.height * scale);
+    off.getContext('2d').drawImage(currentImage, 0, 0, off.width, off.height);
 
-    $('writeCaptions').disabled = true;
-    $('moreCaptions').disabled = true;
+    var url;
+    try { url = off.toDataURL('image/jpeg', 0.85); }
+    catch (e) { throw new Error('That image came from a server that will not let this page read it back. Upload it from disk instead.'); }
+
+    return {
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/jpeg', data: url.slice(url.indexOf(',') + 1) }
+    };
+  }
+
+  function askForCaptions(content, append){
+    var key = $('claudeKey').value.trim();
+    if (!key) { captionStatus('Add your Claude API key in Settings first.'); openSettings(); return; }
+
+    var buttons = [$('writeCaptions'), $('moreCaptions'), $('readImage')];
+    buttons.forEach(function(b){ b.disabled = true; });
     captionStatus('Writing. This takes a few seconds.', true);
 
     fetch('https://api.anthropic.com/v1/messages', {
@@ -676,7 +711,7 @@
         model: CAPTION_MODEL,
         max_tokens: 4000,
         output_config: { effort: 'medium' },
-        messages: [{ role: 'user', content: captionPrompt(brief, append ? seen : []) }]
+        messages: [{ role: 'user', content: content }]
       })
     })
     .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, body: j }; }); })
@@ -685,7 +720,7 @@
         throw new Error(res.body && res.body.error ? res.body.error.message : 'Request failed.');
       }
       if (res.body.stop_reason === 'refusal') {
-        throw new Error('Claude declined this brief. Try wording it differently.');
+        throw new Error('Claude declined this one. Try wording it differently.');
       }
       var text = (res.body.content || []).filter(function(b){ return b.type === 'text'; })
                                          .map(function(b){ return b.text; }).join('');
@@ -697,9 +732,27 @@
     })
     .catch(function(err){ captionStatus(err.message); })
     .then(function(){
-      $('writeCaptions').disabled = false;
-      $('moreCaptions').disabled = false;
+      buttons.forEach(function(b){ b.disabled = false; });
+      syncImageButton();
     });
+  }
+
+  function writeCaptions(append){
+    var brief = $('brief').value.trim();
+    if (!brief) { captionStatus('Say what the captions should be about first.'); return; }
+    askForCaptions([{ type: 'text', text: briefPrompt(brief) }], append);
+  }
+
+  function readImage(){
+    var block;
+    try { block = imageBlock(); }
+    catch (e) { captionStatus(e.message); return; }
+    if (!block) { captionStatus('Put an image on the canvas first, from the feed or your own files.'); return; }
+    askForCaptions([block, { type: 'text', text: imageReadPrompt($('brief').value.trim()) }], false);
+  }
+
+  function syncImageButton(){
+    $('readImage').disabled = !currentImage;
   }
 
   function renderIdeas(rows, append){
@@ -713,7 +766,7 @@
       if (r.object){
         var shot = document.createElement('span');
         shot.className = 'shot';
-        shot.textContent = 'Shoot: ' + r.object;
+        shot.textContent = currentImage ? 'Reading: ' + r.object : 'Shoot: ' + r.object;
         p.appendChild(shot);
       }
 
@@ -723,7 +776,7 @@
       use.textContent = 'Use';
       use.addEventListener('click', function(){
         $('caption').value = r.caption;
-        if (r.object) $('genPrompt').value = imagePrompt(r.object);
+        if (r.object && !currentImage) $('genPrompt').value = imagePrompt(r.object);
         draw();
       });
 
@@ -788,7 +841,7 @@
   function loadImage(src){
     var img = new Image();
     img.crossOrigin = 'anonymous';
-    img.onload = function(){ currentImage = img; draw(); };
+    img.onload = function(){ currentImage = img; draw(); syncImageButton(); };
     img.onerror = function(){ genStatus('That image could not be loaded.'); };
     img.src = src;
   }
@@ -983,6 +1036,7 @@
   $('generate').addEventListener('click', generate);
   $('writeCaptions').addEventListener('click', function(){ writeCaptions(false); });
   $('moreCaptions').addEventListener('click', function(){ writeCaptions(true); });
+  $('readImage').addEventListener('click', readImage);
 
   $('upload').addEventListener('change', function(e){
     var f = e.target.files && e.target.files[0];
@@ -996,6 +1050,7 @@
     currentImage = null;
     $('upload').value = '';
     draw();
+    syncImageButton();
   });
 
   $('download').addEventListener('click', function(){

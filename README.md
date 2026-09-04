@@ -11,10 +11,16 @@ A single-file web app for making feed-sized caption images. It has two halves:
   Archivo 800 over an uploaded or generated image on a 1080 × 1350 canvas, and
   exports it as a PNG.
 
-Captions come from the Claude API (`claude-opus-5`): give it a brief, get six
-captions back, each with the object to shoot underneath it. "6 more" asks again
-and tells Claude what it already wrote, so the list keeps going without
-repeating. Picking a caption also loads a matching image prompt.
+Captions come from the Claude API (`claude-opus-5`) two ways:
+
+- **From a brief** — describe the subject, get six captions back, each with the
+  object to shoot underneath it. "6 more" asks again and tells Claude what it
+  already wrote, so the list keeps going without repeating. Picking a caption
+  loads a matching image prompt.
+- **From the image** — with a picture on the canvas, **Read the image** sends it
+  to Claude, which works out what is actually in the frame and writes six
+  captions against that specific detail rather than a generic version of the
+  object. Sharpest first. The image is downsized to 1024px and sent as JPEG.
 
 Images can be uploaded from disk or generated with the Gemini API.
 
