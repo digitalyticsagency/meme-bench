@@ -281,6 +281,7 @@
       <button id="writeCaptions">Write 6 captions</button>
       <button class="ghost" id="moreCaptions">6 more</button>
       <button class="ghost" id="readImage" disabled>Read the image</button>
+      <button class="ghost" id="stopWork" hidden>Stop</button>
     </div>
     <div id="captionStatus" class="alert hidden"></div>
     <ul class="ideas" id="ideas"></ul>
@@ -478,6 +479,27 @@
   var CAPTION_MODEL = 'claude-opus-5';
   var seen = [];
 
+  var ticker = null;
+
+  function startTicker(label){
+    var began = Date.now();
+    var state = label;
+    stopTicker();
+    $('stopWork').hidden = false;
+    var tick = function(){
+      var secs = Math.round((Date.now() - began) / 1000);
+      captionStatus(state + ' — ' + secs + 's', true);
+    };
+    tick();
+    ticker = setInterval(tick, 1000);
+    return function(next){ state = next; tick(); };
+  }
+
+  function stopTicker(){
+    if (ticker){ clearInterval(ticker); ticker = null; }
+    $('stopWork').hidden = true;
+  }
+
   function captionStatus(msg, ok){
     var el = $('captionStatus');
     el.textContent = msg;
@@ -613,12 +635,21 @@
     };
   }
 
-  function callClaude(payload){
+  var inFlight = null;
+
+  /* Streamed, so a long research run cannot die on an HTTP timeout and the
+     page can say what it is doing while it waits. */
+  function callClaude(payload, onProgress){
     var key = $('claudeKey').value.trim();
     if (!key) return Promise.reject(new Error('Add your Claude API key in Settings first.'));
 
+    var controller = new AbortController();
+    inFlight = controller;
+    payload.stream = true;
+
     return fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
+      signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': key,
@@ -627,18 +658,94 @@
       },
       body: JSON.stringify(payload)
     })
-    .catch(function(){
+    .catch(function(err){
+      if (err && err.name === 'AbortError') throw err;
       /* fetch rejects before any response: the request never left the browser
          or never came back. Nothing about the key or the prompt is at fault. */
       throw new Error(networkHint());
     })
-    .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, body: j }; }); })
-    .then(function(res){
-      if (!res.ok) throw new Error(res.body && res.body.error ? res.body.error.message : 'Request failed.');
-      if (res.body.stop_reason === 'refusal') throw new Error('Claude declined this one. Try wording it differently.');
-      return (res.body.content || []).filter(function(b){ return b.type === 'text'; })
-                                     .map(function(b){ return b.text; }).join('\n');
+    .then(function(r){
+      if (!r.ok){
+        return r.json().catch(function(){ return null; }).then(function(j){
+          throw new Error(j && j.error ? j.error.message : 'Request failed with status ' + r.status + '.');
+        });
+      }
+      return readStream(r, onProgress);
+    })
+    .then(function(result){
+      inFlight = null;
+      if (result.stopReason === 'refusal') throw new Error('Claude declined this one. Try wording it differently.');
+      if (!result.text.trim()) throw new Error('Claude finished without writing anything. Try again.');
+      return result.text;
+    }, function(err){
+      inFlight = null;
+      throw err;
     });
+  }
+
+  function cancelInFlight(){
+    if (inFlight){ inFlight.abort(); inFlight = null; }
+  }
+
+  function readStream(response, onProgress){
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = '';
+    var text = '';
+    var stopReason = null;
+    var searches = 0, fetches = 0;
+
+    function announce(){
+      if (!onProgress) return;
+      if (text) onProgress('writing');
+      else if (fetches) onProgress('reading ' + fetches + ' page' + (fetches === 1 ? '' : 's'));
+      else if (searches) onProgress('searching, ' + searches + ' so far');
+      else onProgress('looking at the image');
+    }
+
+    function handle(evt){
+      if (evt.type === 'error'){
+        throw new Error(evt.error && evt.error.message ? evt.error.message : 'The stream failed.');
+      }
+      if (evt.type === 'content_block_start' && evt.content_block){
+        var kind = evt.content_block.type;
+        if (kind === 'server_tool_use'){
+          if (evt.content_block.name === 'web_fetch') fetches++;
+          else searches++;
+          announce();
+        }
+      }
+      if (evt.type === 'content_block_delta' && evt.delta && evt.delta.type === 'text_delta'){
+        text += evt.delta.text;
+        announce();
+      }
+      if (evt.type === 'message_delta' && evt.delta && evt.delta.stop_reason){
+        stopReason = evt.delta.stop_reason;
+      }
+    }
+
+    function pump(){
+      return reader.read().then(function(chunk){
+        if (chunk.done) return { text: text, stopReason: stopReason };
+        buffer += decoder.decode(chunk.value, { stream: true });
+
+        var parts = buffer.split('\n\n');
+        buffer = parts.pop();
+        parts.forEach(function(part){
+          part.split('\n').forEach(function(line){
+            if (line.indexOf('data:') !== 0) return;
+            var raw = line.slice(5).trim();
+            if (!raw || raw === '[DONE]') return;
+            var evt;
+            try { evt = JSON.parse(raw); } catch (e) { return; }
+            handle(evt);
+          });
+        });
+        return pump();
+      });
+    }
+
+    return pump();
   }
 
   function networkHint(){
@@ -651,8 +758,8 @@
     return 'Could not reach api.anthropic.com. The request never left the browser, so this is not the key or the prompt. Usually an ad blocker or privacy extension blocking the call, a VPN or work network blocking the host, or the browser being offline. Try a private window with extensions off.';
   }
 
-  var SEARCH_TOOL = { type: 'web_search_20260209', name: 'web_search', max_uses: 8 };
-  var FETCH_TOOL = { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 8, max_content_tokens: 30000 };
+  var SEARCH_TOOL = { type: 'web_search_20260209', name: 'web_search', max_uses: 4 };
+  var FETCH_TOOL = { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 3, max_content_tokens: 12000 };
 
   /* imgflip keeps every template's real captioned examples on one page, and the
      caption text of each is right there in the markup. web_fetch will only open
@@ -689,7 +796,11 @@
   function findFormats(){
     var btn = $('findFormats');
     btn.disabled = true;
-    trendStatus('Searching for what is landing right now. Around half a minute.', true);
+    var began = Date.now();
+    var trendTick = setInterval(function(){
+      trendStatus('Searching for what is landing right now — ' + Math.round((Date.now() - began) / 1000) + 's', true);
+    }, 1000);
+    trendStatus('Searching for what is landing right now — 0s', true);
 
     var prompt = [
       'Search the web for which meme formats are actually being used and shared right now, this month. Look at what people are posting, not listicles of all-time classics.',
@@ -707,6 +818,7 @@
       messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }]
     })
     .then(function(text){
+      clearInterval(trendTick);
       var rows = parseJsonArray(text);
       var list = $('trends');
       list.innerHTML = '';
@@ -739,18 +851,22 @@
       trendStatus(rows.length + ' formats, researched from this month. Ones the feed also has get a button.', true);
     })
     .catch(function(err){
-      trendStatus(err.message);
-      if (/API key/.test(err.message)) openSettings();
+      clearInterval(trendTick);
+      if (err && err.name === 'AbortError') trendStatus('Stopped.');
+      else {
+        trendStatus(err.message);
+        if (/API key/.test(err.message)) openSettings();
+      }
     })
-    .then(function(){ btn.disabled = false; });
+    .then(function(){ clearInterval(trendTick); btn.disabled = false; });
   }
 
   function askForCaptions(content, append, research){
     var buttons = [$('writeCaptions'), $('moreCaptions'), $('readImage')];
     buttons.forEach(function(b){ b.disabled = true; });
-    captionStatus(research
-      ? 'Looking at the image and reading how this format is used. Around half a minute.'
-      : 'Writing. This takes a few seconds.', true);
+    var setState = startTicker(research
+      ? 'Reading real examples of this format'
+      : 'Writing');
 
     var payload = {
       model: CAPTION_MODEL,
@@ -760,19 +876,25 @@
     };
     if (research) payload.tools = [SEARCH_TOOL, FETCH_TOOL];
 
-    callClaude(payload)
+    callClaude(payload, function(stage){ setState(research ? 'Reading real examples — ' + stage : 'Writing'); })
     .then(function(text){
       var rows = parseCaptions(text);
       if (!rows.length) throw new Error('No captions came back. Try a more concrete brief.');
       rows.forEach(function(r){ seen.push(r.lines.join(' / ')); });
       renderIdeas(rows, append);
+      stopTicker();
       reportResearch(rows[0]);
     })
     .catch(function(err){
-      captionStatus(err.message);
-      if (/API key/.test(err.message)) openSettings();
+      stopTicker();
+      if (err && err.name === 'AbortError') captionStatus('Stopped.');
+      else {
+        captionStatus(err.message);
+        if (/API key/.test(err.message)) openSettings();
+      }
     })
     .then(function(){
+      stopTicker();
       buttons.forEach(function(b){ b.disabled = false; });
       syncImageButton();
     });
@@ -1160,6 +1282,7 @@
   $('moreCaptions').addEventListener('click', function(){ writeCaptions(true); });
   $('readImage').addEventListener('click', readImage);
   $('findFormats').addEventListener('click', findFormats);
+  $('stopWork').addEventListener('click', cancelInFlight);
 
   $('upload').addEventListener('change', function(e){
     var f = e.target.files && e.target.files[0];

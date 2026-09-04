@@ -30,8 +30,15 @@ Captions come from the Claude API (`claude-opus-5`) two ways:
   It reports what it identified the image as and quotes three of the real
   captions it read, so you can see whether the research actually happened. If it
   found none, it says so rather than pretending. Funniest first, one line per
-  text box. The image is downsized to 1024px and sent as JPEG; the round trip
-  takes around half a minute.
+  text box. The image is downsized to 1024px and sent as JPEG.
+
+  The request is streamed, so a long run cannot die on an HTTP timeout, and the
+  status line says what is happening — searching, how many pages it is reading,
+  then writing — with a running clock and a **Stop** button. Expect anywhere from
+  half a minute to a few minutes depending on how much it reads. Search is capped
+  at 4 uses and fetch at 3; each round trip is where the time goes, so raise
+  those in `SEARCH_TOOL` and `FETCH_TOOL` only if you want deeper research and
+  will wait for it.
 
   One limit worth knowing: meme captions live inside the pixels, and the fetch
   tool returns page text, so nothing here does OCR on found images. What it can
