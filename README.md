@@ -3,8 +3,11 @@
 A single-file web app for making feed-sized caption images. It has two halves:
 
 - **What is climbing** — the top 100 Imgflip templates, ranked by how many
-  captions people made on each this week. Any of them drops onto the canvas,
-  carrying its name and text-box count with it. **Ask Claude what is landing**
+  captions people made on each this week. Imgflip returns the same ranked
+  hundred every call, so **Next 30** walks through them thirty at a time and
+  wraps at the end, and **Shuffle** reorders the whole set. Any template drops
+  onto the canvas, carrying its name and text-box count with it. **Ask Claude
+  what is landing**
   answers the same question by searching the web instead: six formats in use
   right now, with the joke structure each carries. Formats the feed also stocks
   get a button to load straight onto the canvas.

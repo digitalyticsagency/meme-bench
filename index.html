@@ -244,10 +244,11 @@
   <section class="col">
     <h2>What is climbing <span id="feedStatus">idle</span></h2>
 
-    <p class="note">The templates people are actually building on right now, ranked by how many captions were made this week. Put one on the canvas and Claude can read it. Or ask what is landing right now — that answer comes from a web search, not a feed.</p>
+    <p class="note">Imgflip's hundred most-used templates this week, ranked by how many captions people made. Next 30 walks through them, Shuffle reorders the lot. Put one on the canvas and Claude can read it — or ask what is landing right now, which comes from a web search rather than the feed.</p>
 
     <div class="row">
-      <button id="refresh">Refresh feed</button>
+      <button id="refresh">Next 30</button>
+      <button class="ghost" id="shuffle">Shuffle</button>
       <button class="ghost" id="findFormats">Ask Claude what is landing</button>
     </div>
 
@@ -386,31 +387,71 @@
   var knownTemplates = [];
 
   /* ---- imgflip: no key, no setup ---- */
+  var PAGE = 30;
+  var allTemplates = [];
+  var page = 0;
+
+  function toRow(m){
+    return {
+      title: m.name,
+      score: m.captions || 0,
+      unit: 'captions made',
+      meta: m.width + ' × ' + m.height,
+      link: 'https://imgflip.com/memetemplate/' + m.id,
+      thumb: m.url,
+      image: m.url,
+      template: { name: m.name, boxes: m.box_count || 1, source: 'Imgflip' }
+    };
+  }
+
+  function showPage(){
+    if (!allTemplates.length) return;
+    var pages = Math.ceil(allTemplates.length / PAGE);
+    page = ((page % pages) + pages) % pages;
+
+    var from = page * PAGE;
+    var rows = allTemplates.slice(from, from + PAGE);
+
+    /* knownTemplates backs the research matcher, so it keeps the whole set
+       rather than whichever page happens to be on screen. */
+    feedStatus((from + 1) + '–' + (from + rows.length) + ' of ' + allTemplates.length);
+    renderFeed(rows);
+  }
+
   function loadImgflip(){
+    /* Imgflip returns the same ranked hundred every call, so refreshing walks
+       through them instead of re-rendering the same thirty. */
+    if (allTemplates.length){
+      page++;
+      showPage();
+      return;
+    }
+
     fetch('https://api.imgflip.com/get_memes')
       .then(function(r){ if (!r.ok) throw new Error('Imgflip returned ' + r.status); return r.json(); })
       .then(function(j){
         if (!j.success || !j.data || !j.data.memes) throw new Error(j.error_message || 'Imgflip sent no templates.');
-        var rows = j.data.memes.slice(0, 30).map(function(m){
-          return {
-            title: m.name,
-            score: m.captions || 0,
-            unit: 'captions made',
-            meta: m.width + ' × ' + m.height,
-            link: 'https://imgflip.com/memetemplate/' + m.id,
-            thumb: m.url,
-            image: m.url,
-            template: { name: m.name, boxes: m.box_count || 1, source: 'Imgflip' }
-          };
-        });
-        knownTemplates = rows;
-        feedStatus(rows.length + ' templates');
-        renderFeed(rows);
+        allTemplates = j.data.memes.map(toRow);
+        knownTemplates = allTemplates;
+        page = 0;
+        showPage();
       })
       .catch(function(err){
         feedStatus('failed');
         showFeedError(err instanceof TypeError ? networkHint() : err.message + ' Try refreshing.');
       });
+  }
+
+  function shuffleTemplates(){
+    if (!allTemplates.length) { loadImgflip(); return; }
+    for (var i = allTemplates.length - 1; i > 0; i--){
+      var j = Math.floor(Math.random() * (i + 1));
+      var swap = allTemplates[i];
+      allTemplates[i] = allTemplates[j];
+      allTemplates[j] = swap;
+    }
+    page = 0;
+    showPage();
   }
 
   /* ---- shared rendering ---- */
@@ -1332,6 +1373,7 @@
   $('readImage').addEventListener('click', readImage);
   $('findFormats').addEventListener('click', findFormats);
   $('stopWork').addEventListener('click', cancelInFlight);
+  $('shuffle').addEventListener('click', shuffleTemplates);
 
   $('upload').addEventListener('change', function(e){
     var f = e.target.files && e.target.files[0];
